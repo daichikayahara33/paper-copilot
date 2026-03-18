@@ -382,6 +382,48 @@ async function searchPapersWithRefs(query) {
     }
   }
 
+  // Step 3: Collect unique referenced paper IDs not already in seeds
+  const seedIds = new Set(seeds.map(s => s.id));
+  const refIds = new Set();
+  for (const s of seeds) {
+    for (const rid of (s.references || [])) {
+      if (!seedIds.has(rid)) refIds.add(rid);
+    }
+  }
+
+  // Step 4: Batch fetch referenced papers (up to 100)
+  const refIdList = [...refIds].slice(0, 100);
+  if (refIdList.length > 0) {
+    const refFields = "paperId,title,authors,abstract,year,venue,externalIds,citationCount,references";
+    const refBatchUrl = `${S2_API}/paper/batch?fields=${refFields}`;
+    const refHeaders = { "User-Agent": "PaperCopilot/1.0", "Content-Type": "application/json" };
+    if (_s2Key) refHeaders["x-api-key"] = _s2Key;
+
+    // Batch in chunks of 50 to avoid too-large requests
+    for (let i = 0; i < refIdList.length; i += 50) {
+      const chunk = refIdList.slice(i, i + 50);
+      try {
+        const refResp = await fetch(refBatchUrl, {
+          method: "POST",
+          headers: refHeaders,
+          body: JSON.stringify({ ids: chunk }),
+        });
+        if (refResp.ok) {
+          const refData = await refResp.json();
+          for (const d of refData) {
+            if (!d || !d.paperId || seedIds.has(d.paperId)) continue;
+            const p = parsePaper(d);
+            p.references = (d.references || []).filter(r => r && r.paperId).map(r => r.paperId);
+            seeds.push(p);
+            seedIds.add(p.id);
+          }
+        }
+      } catch (e) {
+        // Continue with what we have if batch fails
+      }
+    }
+  }
+
   return seeds.sort((a, b) => b.cited - a.cited);
 }
 
