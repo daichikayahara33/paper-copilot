@@ -257,17 +257,21 @@ function switchTab(name) {
 }
 
 // ── S2 API ──
+const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
 async function s2Fetch(url) {
   let resp;
-  try {
-    // Try local proxy first (for localhost dev)
-    const s2Base = 'https://api.semanticscholar.org/graph/v1/';
-    if (url.startsWith(s2Base)) {
-      const proxyUrl = '/api/s2/' + url.slice(s2Base.length);
-      resp = await fetch(proxyUrl);
-      if (resp.ok) return resp;
-    }
-  } catch(e) { /* proxy not available, try direct */ }
+  // Use proxy only on localhost (dev server)
+  if (isLocalhost) {
+    try {
+      const s2Base = 'https://api.semanticscholar.org/graph/v1/';
+      if (url.startsWith(s2Base)) {
+        const proxyUrl = '/api/s2/' + url.slice(s2Base.length);
+        resp = await fetch(proxyUrl);
+        if (resp.ok) return resp;
+      }
+    } catch(e) { /* proxy not available, try direct */ }
+  }
   try {
     resp = await fetch(url);
   } catch(e) {
