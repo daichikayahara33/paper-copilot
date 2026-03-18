@@ -209,7 +209,7 @@ function generateGraphPNG(papers, query) {
     r: 6 + Math.min(20, Math.sqrt(p.cited) * 0.5),
   }));
 
-  // Build edges (citation links within our set)
+  // Build citation edges
   const idToIdx = {};
   nodes.forEach((n, i) => { idToIdx[n.paper.id] = i; });
   const edges = [];
@@ -221,24 +221,53 @@ function generateGraphPNG(papers, query) {
     }
   }
 
-  // Build bibliographic coupling edges (shared references → attract in simulation)
-  const simEdges = [];
+  // Build similarity edges (co-author + title keyword overlap)
+  // Used when citation data is sparse (common for very recent papers)
+  const stopWords = new Set(["a","an","the","of","in","for","and","or","to","on","with","by","from","is","are","at","as","its","via","using","based","towards","through"]);
+  function titleWords(title) {
+    return (title || "").toLowerCase().split(/\W+/).filter(w => w.length > 2 && !stopWords.has(w));
+  }
+
+  const similarityEdges = [];
   for (let i = 0; i < nodes.length; i++) {
-    const refsI = new Set(nodes[i].paper.references || []);
-    if (refsI.size === 0) continue;
+    const authorsI = new Set(nodes[i].paper.authors || []);
+    const wordsI = new Set(titleWords(nodes[i].paper.title));
     for (let j = i + 1; j < nodes.length; j++) {
+      // Check shared authors
+      let sharedAuthors = 0;
+      for (const a of (nodes[j].paper.authors || [])) { if (authorsI.has(a)) sharedAuthors++; }
+
+      // Check shared title keywords
+      let sharedWords = 0;
+      for (const w of titleWords(nodes[j].paper.title)) { if (wordsI.has(w)) sharedWords++; }
+
+      // Bibliographic coupling (shared references)
+      const refsI = nodes[i].paper.references || [];
       const refsJ = nodes[j].paper.references || [];
-      if (refsJ.length === 0) continue;
-      let shared = 0;
-      for (const r of refsJ) { if (refsI.has(r)) shared++; }
-      if (shared >= 2) {
-        simEdges.push([i, j, shared]);
+      let sharedRefs = 0;
+      if (refsI.length > 0 && refsJ.length > 0) {
+        const refSet = new Set(refsI);
+        for (const r of refsJ) { if (refSet.has(r)) sharedRefs++; }
+      }
+
+      const score = sharedAuthors * 3 + sharedRefs * 2 + (sharedWords >= 2 ? sharedWords : 0);
+      if (score >= 2) {
+        similarityEdges.push([i, j, score, sharedAuthors > 0 ? "coauthor" : "keyword"]);
       }
     }
   }
 
-  // All edges for force simulation (citation + similarity)
-  const allForceEdges = [...edges.map(e => [...e, 1]), ...simEdges];
+  // Visible edges = citation + similarity (when citation edges are sparse)
+  const visibleEdges = [...edges.map(e => ({ s: e[0], t: e[1], type: "cite" }))];
+  for (const [si, ti, score, type] of similarityEdges) {
+    visibleEdges.push({ s: si, t: ti, type });
+  }
+
+  // All edges for force simulation
+  const allForceEdges = [
+    ...edges.map(e => [...e, 2]),
+    ...similarityEdges.map(e => [e[0], e[1], e[2]]),
+  ];
 
   // Force simulation (300 iterations)
   for (let iter = 0; iter < 300; iter++) {
@@ -303,8 +332,12 @@ function generateGraphPNG(papers, query) {
   svg += `<text x="${W/2}" y="30" text-anchor="middle" fill="#e0e0f0" font-family="Noto Sans,sans-serif" font-size="18" font-weight="bold">Paper Copilot — "${escXml(query)}"</text>`;
 
   // Edges
-  for (const [si, ti] of edges) {
-    svg += `<line x1="${nodes[si].x}" y1="${nodes[si].y}" x2="${nodes[ti].x}" y2="${nodes[ti].y}" stroke="rgba(140,180,255,0.5)" stroke-width="1.5"/>`;
+  for (const e of visibleEdges) {
+    const color = e.type === "cite" ? "rgba(140,180,255,0.6)" :
+                  e.type === "coauthor" ? "rgba(255,200,100,0.5)" :
+                  "rgba(140,255,180,0.35)";
+    const width = e.type === "cite" ? 1.8 : 1.2;
+    svg += `<line x1="${nodes[e.s].x}" y1="${nodes[e.s].y}" x2="${nodes[e.t].x}" y2="${nodes[e.t].y}" stroke="${color}" stroke-width="${width}"/>`;
   }
 
   // Nodes + labels
