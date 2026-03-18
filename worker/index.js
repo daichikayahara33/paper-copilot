@@ -6,18 +6,23 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'x-s2-key',
           'Access-Control-Max-Age': '86400',
         },
       });
     }
 
     const url = new URL(request.url);
-    // /paper/search?query=... -> https://api.semanticscholar.org/graph/v1/paper/search?query=...
     const s2Url = 'https://api.semanticscholar.org/graph/v1' + url.pathname + url.search;
 
-    const resp = await fetch(s2Url, {
-      headers: { 'User-Agent': 'PaperCopilot/1.0' },
-    });
+    // Forward S2 API key if provided
+    const reqHeaders = { 'User-Agent': 'PaperCopilot/1.0' };
+    const s2Key = request.headers.get('x-s2-key');
+    if (s2Key) {
+      reqHeaders['x-api-key'] = s2Key;
+    }
+
+    const resp = await fetch(s2Url, { headers: reqHeaders });
 
     const headers = new Headers(resp.headers);
     headers.set('Access-Control-Allow-Origin', '*');

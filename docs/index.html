@@ -264,9 +264,10 @@ const S2_PROXY = 'https://s2-proxy.d-kayahara33.workers.dev/';
 let s2LastCall = 0;
 
 async function s2Fetch(url) {
-  // Throttle: at least 1s between requests
+  // Throttle: 1s on localhost (with API key), 3s on GitHub Pages (without key)
+  const throttle = (isLocalhost || getS2Key()) ? 1000 : 3000;
   const now = Date.now();
-  const wait = Math.max(0, 1000 - (now - s2LastCall));
+  const wait = Math.max(0, throttle - (now - s2LastCall));
   if (wait > 0) await sleep(wait);
   s2LastCall = Date.now();
 
@@ -286,9 +287,16 @@ async function s2Fetch(url) {
     ? S2_PROXY + url.slice(S2_BASE.length)
     : url;
 
+  // Pass S2 API key through Worker if available
+  const fetchOpts = {};
+  const s2Key = getS2Key();
+  if (s2Key && !isLocalhost && url.startsWith(S2_BASE)) {
+    fetchOpts.headers = { 'x-s2-key': s2Key };
+  }
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      resp = await fetch(fetchUrl);
+      resp = await fetch(fetchUrl, fetchOpts);
     } catch(e) {
       throw new Error(`Network error: ${e.message}`);
     }
