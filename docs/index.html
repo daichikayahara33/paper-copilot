@@ -502,7 +502,7 @@ async function suggestRelatedQueries(query, seeds) {
       chipsEl.appendChild(chip);
     }
   } catch (e) {
-    rqEl.innerHTML = '';
+    rqEl.innerHTML = `<div class="rq-label" style="color:var(--red)">Related search error: ${e.message}</div>`;
   }
 }
 
