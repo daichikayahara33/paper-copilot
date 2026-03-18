@@ -2,6 +2,7 @@ import { Resvg, initWasm } from "@resvg/resvg-wasm";
 import wasmModule from "@resvg/resvg-wasm/index_bg.wasm";
 
 let wasmReady = false;
+let fontData = null;
 
 const APP_URL = "https://daichikayahara33.github.io/paper-copilot/";
 const S2_API = "https://api.semanticscholar.org/graph/v1";
@@ -14,6 +15,10 @@ export default {
     if (!wasmReady) {
       await initWasm(wasmModule);
       wasmReady = true;
+    }
+    if (!fontData) {
+      const fontResp = await fetch("https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-400-normal.woff2");
+      if (fontResp.ok) fontData = new Uint8Array(await fontResp.arrayBuffer());
     }
 
     if (url.pathname === "/" && request.method === "GET") {
@@ -276,7 +281,7 @@ function generateGraphPNG(papers, query) {
   svg += `<rect width="${W}" height="${H}" fill="#0f0f1a"/>`;
 
   // Title
-  svg += `<text x="${W/2}" y="30" text-anchor="middle" fill="#e0e0f0" font-family="Arial,sans-serif" font-size="18" font-weight="bold">Paper Copilot — "${escXml(query)}"</text>`;
+  svg += `<text x="${W/2}" y="30" text-anchor="middle" fill="#e0e0f0" font-family="Noto Sans,sans-serif" font-size="18" font-weight="bold">Paper Copilot — "${escXml(query)}"</text>`;
 
   // Edges
   for (const [si, ti] of edges) {
@@ -291,27 +296,35 @@ function generateGraphPNG(papers, query) {
     const last = n.paper.authors[0] ? n.paper.authors[0].split(" ").pop() : "?";
     const suffix = n.paper.authors.length > 1 ? " et al." : "";
     const label = `${last}${suffix} ${n.paper.year || ""}`;
-    svg += `<text x="${n.x + n.r + 4}" y="${n.y + 4}" fill="#ccc" font-family="Arial,sans-serif" font-size="10">${escXml(label)}</text>`;
+    svg += `<text x="${n.x + n.r + 4}" y="${n.y + 4}" fill="#ccc" font-family="Noto Sans,sans-serif" font-size="10">${escXml(label)}</text>`;
   }
 
   // Year legend
   const legendX = 20, legendY = H - 60;
   svg += `<rect x="${legendX}" y="${legendY}" width="180" height="50" rx="6" fill="rgba(26,26,46,0.9)"/>`;
-  svg += `<text x="${legendX + 10}" y="${legendY + 16}" fill="#888" font-family="Arial,sans-serif" font-size="10">Year</text>`;
+  svg += `<text x="${legendX + 10}" y="${legendY + 16}" fill="#888" font-family="Noto Sans,sans-serif" font-size="10">Year</text>`;
   for (let i = 0; i <= 4; i++) {
     const yr = 2010 + i * 4;
     const cx = legendX + 15 + i * 35;
     svg += `<circle cx="${cx}" cy="${legendY + 32}" r="5" fill="${yearToColor(yr)}"/>`;
-    svg += `<text x="${cx}" y="${legendY + 45}" text-anchor="middle" fill="#888" font-family="Arial,sans-serif" font-size="8">${yr}</text>`;
+    svg += `<text x="${cx}" y="${legendY + 45}" text-anchor="middle" fill="#888" font-family="Noto Sans,sans-serif" font-size="8">${yr}</text>`;
   }
 
   // Paper count
-  svg += `<text x="${W - 20}" y="${H - 10}" text-anchor="end" fill="#555" font-family="Arial,sans-serif" font-size="10">${nodes.length} papers</text>`;
+  svg += `<text x="${W - 20}" y="${H - 10}" text-anchor="end" fill="#555" font-family="Noto Sans,sans-serif" font-size="10">${nodes.length} papers</text>`;
 
   svg += `</svg>`;
 
   // Convert SVG to PNG
-  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: W } });
+  const opts = {
+    fitTo: { mode: "width", value: W },
+    font: {
+      loadSystemFonts: false,
+      defaultFontFamily: "Noto Sans",
+      fontBuffers: fontData ? [fontData] : [],
+    },
+  };
+  const resvg = new Resvg(svg, opts);
   const pngData = resvg.render();
   return pngData.asPng();
 }
