@@ -1050,10 +1050,18 @@ loadSettings();
 loadPapersFromStorage();
 loop();
 
-// Auto-search from URL parameter: ?q=keyword
+// Auto-search from URL parameter: ?q=keyword, ?fresh=1 for clean state
 (function() {
   const params = new URLSearchParams(location.search);
   const q = params.get('q');
+  const fresh = params.get('fresh');
+  if (fresh) {
+    // Clear existing papers for a fresh graph
+    localStorage.removeItem('pc_papers');
+    papers = [];
+    Object.keys(paperMap).forEach(k => delete paperMap[k]);
+    graphEdges = [];
+  }
   if (q) {
     document.getElementById('search-input').value = q;
     setTimeout(() => doSearch(), 500);

@@ -1,17 +1,16 @@
-import puppeteer from "@cloudflare/puppeteer";
-
 const APP_URL = "https://daichikayahara33.github.io/paper-copilot/";
+const S2_API = "https://api.semanticscholar.org/graph/v1";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    _s2Key = env.S2_API_KEY || "";
 
-    // Health check
     if (url.pathname === "/" && request.method === "GET") {
       return new Response("Paper Copilot Slack Bot is running.");
     }
 
-    // Slack slash command: POST /slack
+    // Slack slash command
     if (url.pathname === "/slack" && request.method === "POST") {
       const formData = await request.formData();
       const text = formData.get("text") || "";
@@ -21,92 +20,165 @@ export default {
         return jsonResponse({ text: "Usage: /papers <keyword>\nExample: /papers VLA" });
       }
 
-      // Respond immediately (Slack requires <3s)
-      // Then process asynchronously
-      const ctx = env.ctx || { waitUntil: (p) => p };
-      ctx.waitUntil(generateAndSend(env, text.trim(), responseUrl));
+      ctx.waitUntil(handleQuery(env, text.trim(), null, responseUrl));
 
       return jsonResponse({
         response_type: "in_channel",
-        text: `🔍 Searching papers for "${text.trim()}"... Graph will be posted shortly.`,
+        text: `🔍 Searching papers for "${text.trim()}"...`,
       });
     }
 
-    // Direct screenshot endpoint: GET /screenshot?q=keyword
-    if (url.pathname === "/screenshot") {
-      const query = url.searchParams.get("q");
-      if (!query) return new Response("Missing ?q= parameter", { status: 400 });
+    // Slack Events API
+    if (url.pathname === "/events" && request.method === "POST") {
+      const body = await request.json();
 
-      const imageBuffer = await takeScreenshot(env, query);
-      if (!imageBuffer) return new Response("Screenshot failed", { status: 500 });
+      if (body.type === "url_verification") {
+        return jsonResponse({ challenge: body.challenge });
+      }
 
-      return new Response(imageBuffer, {
-        headers: { "Content-Type": "image/png" },
-      });
+      if (body.type === "event_callback" && body.event?.type === "app_mention") {
+        const keyword = body.event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
+        const channel = body.event.channel;
+        const botToken = env.SLACK_BOT_TOKEN;
+
+        if (keyword && botToken) {
+          ctx.waitUntil(handleQuery(env, keyword, channel, null));
+        }
+        return new Response("ok");
+      }
+
+      return new Response("ok");
     }
 
     return new Response("Not found", { status: 404 });
   },
 };
 
-async function generateAndSend(env, query, responseUrl) {
+async function handleQuery(env, query, channel, responseUrl) {
+  const botToken = env.SLACK_BOT_TOKEN;
+  const pageUrl = `${APP_URL}?q=${encodeURIComponent(query)}&fresh=1`;
+
   try {
-    const imageBuffer = await takeScreenshot(env, query);
-    if (!imageBuffer) {
-      await sendSlackMessage(responseUrl, { text: "❌ Failed to generate graph." });
+    // Search papers from S2 API
+    const papers = await searchPapers(query);
+
+    if (!papers.length) {
+      const msg = `No papers found for "${query}".`;
+      if (channel && botToken) await postSlackChat(botToken, channel, msg);
+      else if (responseUrl) await sendSlackMessage(responseUrl, { response_type: "in_channel", text: msg });
       return;
     }
 
-    // Upload image to Slack via response_url with image
-    // response_url doesn't support file upload, so we post a link instead
-    const pageUrl = `${APP_URL}?q=${encodeURIComponent(query)}`;
-    await sendSlackMessage(responseUrl, {
-      response_type: "in_channel",
-      text: `📊 Paper graph for "${query}"`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `📊 *Paper Citation Graph: "${query}"*\n<${pageUrl}|Open interactive graph>`,
+    // Build text summary
+    const lines = papers.slice(0, 15).map((p, i) =>
+      `${i + 1}. *${p.title}* (${p.year}) — cited: ${p.cited}\n    _${p.authors.slice(0, 3).join(", ")}_`
+    );
+
+    const text = `📊 *Paper Citation Graph: "${query}"*\n<${pageUrl}|🔗 Open interactive graph>\n\n${lines.join("\n\n")}`;
+
+    // Build blocks
+    const blocks = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `📊 *Paper Citation Graph: "${query}"*` },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "🔗 Open Interactive Graph" },
+            url: pageUrl,
+            action_id: "open_graph",
           },
+        ],
+      },
+      { type: "divider" },
+    ];
+
+    // Add top papers
+    for (let i = 0; i < Math.min(10, papers.length); i++) {
+      const p = papers[i];
+      const authors = p.authors.slice(0, 3).join(", ");
+      const arxivLink = p.arxivId ? ` | <https://arxiv.org/abs/${p.arxivId}|arXiv>` : "";
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${i + 1}. ${p.title}*\n${authors} (${p.year}) · Cited: ${p.cited}${arxivLink}`,
         },
-        {
-          type: "image",
-          image_url: `https://paper-copilot-slack.d-kayahara33.workers.dev/screenshot?q=${encodeURIComponent(query)}`,
-          alt_text: `Paper graph for ${query}`,
-        },
-      ],
-    });
-  } catch (e) {
-    if (responseUrl) {
-      await sendSlackMessage(responseUrl, { text: `❌ Error: ${e.message}` });
+      });
     }
+
+    if (papers.length > 10) {
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `+${papers.length - 10} more papers. <${pageUrl}|View all in graph>` }],
+      });
+    }
+
+    if (channel && botToken) {
+      await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${botToken}` },
+        body: JSON.stringify({ channel, text, blocks }),
+      });
+    } else if (responseUrl) {
+      await sendSlackMessage(responseUrl, { response_type: "in_channel", text, blocks });
+    }
+
+  } catch (e) {
+    const errMsg = `❌ Error: ${e.message}`;
+    if (channel && botToken) await postSlackChat(botToken, channel, errMsg);
+    else if (responseUrl) await sendSlackMessage(responseUrl, { response_type: "in_channel", text: errMsg });
   }
 }
 
-async function takeScreenshot(env, query) {
-  let browser;
-  try {
-    browser = await puppeteer.launch(env.BROWSER);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1400, height: 900 });
-
-    const pageUrl = `${APP_URL}?q=${encodeURIComponent(query)}`;
-    await page.goto(pageUrl, { waitUntil: "networkidle0", timeout: 30000 });
-
-    // Wait for graph to stabilize (papers to load + simulation to settle)
-    await page.waitForTimeout(15000);
-
-    // Screenshot the graph area
-    const screenshot = await page.screenshot({ type: "png" });
-    return screenshot;
-  } catch (e) {
-    console.error("Screenshot error:", e);
-    return null;
-  } finally {
-    if (browser) await browser.close();
+let _s2Key = "";
+async function s2Fetch(url) {
+  const headers = { "User-Agent": "PaperCopilot/1.0" };
+  if (_s2Key) headers["x-api-key"] = _s2Key;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const resp = await fetch(url, { headers });
+    if (resp.ok) return resp;
+    if (resp.status === 429) {
+      await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
+      continue;
+    }
+    throw new Error(`S2 API error: ${resp.status}`);
   }
+  throw new Error("S2 API rate limited. Try again later.");
+}
+
+async function searchPapers(query) {
+  const fields = "paperId,title,authors,abstract,year,venue,externalIds,citationCount";
+  const url = `${S2_API}/paper/search?query=${encodeURIComponent(query)}&limit=20&fields=${fields}`;
+
+  const resp = await s2Fetch(url);
+
+  const data = await resp.json();
+  return (data.data || []).map(d => {
+    const authors = (d.authors || []).map(a => a.name).filter(Boolean);
+    const extIds = d.externalIds || {};
+    return {
+      id: d.paperId || "",
+      title: d.title || "",
+      authors,
+      abstract: d.abstract || "",
+      year: d.year || 0,
+      venue: d.venue || "",
+      cited: d.citationCount || 0,
+      arxivId: extIds.ArXiv || "",
+    };
+  }).sort((a, b) => b.cited - a.cited);
+}
+
+async function postSlackChat(token, channel, text) {
+  await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ channel, text }),
+  });
 }
 
 async function sendSlackMessage(responseUrl, body) {
