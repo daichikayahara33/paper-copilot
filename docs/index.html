@@ -689,6 +689,7 @@ function yearToColor(year) {
 
 function addPaperToGraph(p, topic) {
   if (paperMap[p.id]) return;
+  if (!p.abstract || !p.arxivId) return; // Skip papers without abstract or arXiv link
   p.topic = topic;
   p.color = yearToColor(p.year);
   p.x = canvas.width / dpr / 2 + (Math.random() - 0.5) * 300;
