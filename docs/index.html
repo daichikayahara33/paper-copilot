@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Copilot</title>
+<style>
+:root {
+  --bg: #0f0f1a;
+  --surface: #1a1a2e;
+  --surface2: #222240;
+  --border: #333355;
+  --text: #e0e0f0;
+  --text2: #8888aa;
+  --accent: #4e79a7;
+  --accent2: #f28e2b;
+  --green: #59a14f;
+  --red: #e15759;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+button { cursor: pointer; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-family: inherit; }
+input, textarea { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 14px; font-family: inherit; outline: none; }
+input:focus, textarea:focus { border-color: var(--accent); }
+
+/* Layout */
+#app { display: flex; height: 100vh; }
+#sidebar { width: 380px; min-width: 380px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+#main { flex: 1; position: relative; }
+
+/* Sidebar */
+#sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+#sidebar-header h1 { font-size: 18px; margin-bottom: 12px; }
+.tab-bar { display: flex; gap: 4px; }
+.tab-bar button { background: transparent; color: var(--text2); padding: 6px 12px; font-size: 13px; border-radius: 4px; }
+.tab-bar button.active { background: var(--accent); color: #fff; }
+
+#sidebar-content { flex: 1; overflow-y: auto; padding: 16px; }
+
+/* Settings */
+.settings-group { margin-bottom: 16px; }
+.settings-group label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.settings-group input { width: 100%; }
+.settings-status { font-size: 12px; margin-top: 4px; }
+.settings-status.ok { color: var(--green); }
+.settings-status.err { color: var(--red); }
+
+/* Search */
+.search-box { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-box input { flex: 1; }
+.search-box button { background: var(--accent); color: #fff; }
+
+/* Paper list */
+.paper-item { background: var(--surface2); border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; border: 1px solid transparent; transition: border-color 0.15s; }
+.paper-item:hover { border-color: var(--accent); }
+.paper-item.selected { border-color: var(--accent); background: rgba(78,121,167,0.15); }
+.paper-item h3 { font-size: 13px; line-height: 1.4; margin-bottom: 4px; }
+.paper-item .meta { font-size: 11px; color: var(--text2); }
+.paper-item .score { float: right; background: var(--accent); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 12px; font-weight: bold; }
+
+/* My research */
+.my-research { margin-bottom: 16px; }
+.my-research input, .my-research textarea { width: 100%; margin-bottom: 8px; }
+.my-research textarea { height: 80px; resize: vertical; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-green { background: var(--green); color: #fff; }
+
+/* Related work output */
+#rw-output { background: var(--surface2); border-radius: 8px; padding: 16px; margin-top: 12px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; display: none; max-height: 400px; overflow-y: auto; }
+
+/* Graph */
+#graph-canvas { width: 100%; height: 100%; display: block; }
+
+/* Info panel on graph */
+#node-info { position: absolute; top: 16px; right: 16px; width: 400px; background: rgba(26,26,46,0.97); border-radius: 14px; padding: 24px; display: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 10; max-height: calc(100vh - 32px); overflow-y: auto; }
+#node-info h2 { font-size: 17px; margin-bottom: 12px; line-height: 1.5; font-weight: 600; }
+#node-info .ni-authors { font-size: 13px; color: var(--text); margin-bottom: 10px; line-height: 1.5; }
+#node-info .ni-venue-year { font-size: 13px; color: var(--text2); margin-bottom: 8px; }
+#node-info .ni-cited { font-size: 13px; color: var(--text2); margin-bottom: 12px; }
+#node-info .ni-links { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+#node-info .ni-links a { display: inline-flex; align-items: center; gap: 4px; background: var(--accent); color: #fff; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 500; transition: opacity 0.15s; }
+#node-info .ni-links a:hover { opacity: 0.85; }
+#node-info .ni-links a.s2-link { background: #e15759; }
+#node-info .ni-abstract-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+#node-info .ni-abstract { font-size: 13px; color: var(--text); line-height: 1.7; }
+
+/* Loading */
+.loading { text-align: center; padding: 20px; color: var(--text2); }
+.spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Keyword chips */
+.keyword-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
+.chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip:hover { border-color: var(--accent); }
+
+/* Legend */
+#graph-legend {
+  position: absolute; bottom: 16px; left: 16px;
+  background: rgba(26,26,46,0.9); border-radius: 8px; padding: 12px 16px;
+  font-size: 11px; z-index: 10; min-width: 200px;
+}
+#year-chart { display: flex; align-items: flex-end; gap: 2px; height: 60px; margin-bottom: 6px; }
+#year-chart .bar { min-width: 8px; border-radius: 2px 2px 0 0; position: relative; cursor: default; }
+#year-chart .bar:hover::after {
+  content: attr(data-label); position: absolute; bottom: 100%; left: 50%;
+  transform: translateX(-50%); background: #222; padding: 2px 6px; border-radius: 4px;
+  white-space: nowrap; font-size: 10px;
+}
+#year-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>Paper Copilot</h1>
+      <div class="tab-bar">
+        <button class="active" onclick="switchTab('search')">Search</button>
+        <button onclick="switchTab('survey')">Survey</button>
+        <button onclick="switchTab('relatedwork')">Related Work</button>
+        <button onclick="switchTab('settings')">Settings</button>
+      </div>
+    </div>
+    <div id="sidebar-content">
+
+      <!-- Search Tab -->
+      <div id="tab-search">
+        <div class="search-box">
+          <input id="search-input" placeholder="Search keyword..." onkeydown="if(event.key==='Enter')doSearch()">
+          <button onclick="doSearch()" class="btn-primary">Search</button>
+        </div>
+        <div id="search-results"></div>
+      </div>
+
+      <!-- Survey Tab -->
+      <div id="tab-survey" style="display:none">
+        <div class="my-research">
+          <label style="font-size:12px;color:var(--text2)">Your Research Title</label>
+          <input id="my-title" placeholder="Your paper title...">
+          <label style="font-size:12px;color:var(--text2);margin-top:8px;display:block">Your Abstract</label>
+          <textarea id="my-abstract" placeholder="Your paper abstract..."></textarea>
+          <div class="btn-row">
+            <button onclick="doSuggestKeywords()" class="btn-primary">Suggest Keywords</button>
+            <button onclick="doCollectSelected()" class="btn-secondary">Collect Selected</button>
+            <button onclick="doRankPapers()" class="btn-green">Rank Papers</button>
+          </div>
+        </div>
+        <div id="keyword-area"></div>
+        <div id="survey-results"></div>
+      </div>
+
+      <!-- Related Work Tab -->
+      <div id="tab-relatedwork" style="display:none">
+        <div class="my-research">
+          <label style="font-size:12px;color:var(--text2)">Your Research Title</label>
+          <input id="rw-title" placeholder="Your paper title...">
+          <label style="font-size:12px;color:var(--text2);margin-top:8px;display:block">Your Abstract</label>
+          <textarea id="rw-abstract" placeholder="Your paper abstract..."></textarea>
+          <button onclick="doGenerateRW()" class="btn-primary" style="margin-top:8px">Generate Related Work</button>
+        </div>
+        <div id="rw-output"></div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="tab-settings" style="display:none">
+        <div class="settings-group">
+          <label>OpenAI API Key</label>
+          <input id="openai-key" type="password" placeholder="sk-..." oninput="saveSettings()">
+          <div id="openai-status" class="settings-status"></div>
+        </div>
+        <div class="settings-group">
+          <label>OpenAI Model</label>
+          <input id="openai-model" value="gpt-4o-mini" oninput="saveSettings()">
+        </div>
+        <div class="settings-group">
+          <label>Semantic Scholar API Key (optional)</label>
+          <input id="s2-key" type="password" placeholder="Optional..." oninput="saveSettings()">
+        </div>
+        <div class="settings-group">
+          <label>Language</label>
+          <select id="lang-select" onchange="saveSettings()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:14px;width:100%">
+            <option value="ja">Japanese</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div class="settings-group" style="margin-top:24px">
+          <button onclick="if(confirm('Clear all collected papers?')){localStorage.removeItem('pc_papers');papers=[];Object.keys(paperMap).forEach(k=>delete paperMap[k]);graphEdges=[];location.reload();}" style="background:var(--red);color:#fff">Clear All Papers</button>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-top:16px">Keys are stored in your browser's localStorage only. Never sent anywhere except the respective APIs.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="main">
+    <canvas id="graph-canvas"></canvas>
+    <div id="node-info">
+      <h2 id="ni-title"></h2>
+      <div class="ni-authors" id="ni-authors"></div>
+      <div class="ni-venue-year" id="ni-venue-year"></div>
+      <div class="ni-cited" id="ni-cited"></div>
+      <div class="ni-links" id="ni-links"></div>
+      <div class="ni-abstract-label">Abstract</div>
+      <div class="ni-abstract" id="ni-abstract"></div>
+    </div>
+    <div id="graph-legend">
+      <div style="margin-bottom:4px;color:var(--text2)">Papers by Year</div>
+      <div id="year-chart"></div>
+      <div id="year-labels"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──
+let papers = [];  // { id, title, authors, abstract, year, venue, cited, topic, references, color }
+let graphEdges = [];
+const paperMap = {};
+
+// ── Settings ──
+function loadSettings() {
+  document.getElementById('openai-key').value = localStorage.getItem('pc_openai_key') || '';
+  document.getElementById('openai-model').value = localStorage.getItem('pc_openai_model') || 'gpt-4o-mini';
+  document.getElementById('s2-key').value = localStorage.getItem('pc_s2_key') || '';
+  document.getElementById('lang-select').value = localStorage.getItem('pc_lang') || 'ja';
+}
+function saveSettings() {
+  localStorage.setItem('pc_openai_key', document.getElementById('openai-key').value);
+  localStorage.setItem('pc_openai_model', document.getElementById('openai-model').value);
+  localStorage.setItem('pc_s2_key', document.getElementById('s2-key').value);
+  localStorage.setItem('pc_lang', document.getElementById('lang-select').value);
+}
+function getOpenAIKey() { return localStorage.getItem('pc_openai_key') || ''; }
+function getOpenAIModel() { return localStorage.getItem('pc_openai_model') || 'gpt-4o-mini'; }
+function getS2Key() { return localStorage.getItem('pc_s2_key') || ''; }
+function getLang() { return localStorage.getItem('pc_lang') || 'ja'; }
+
+// ── Tabs ──
+function switchTab(name) {
+  ['search','survey','relatedwork','settings'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === name ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+// ── S2 API ──
+async function s2Fetch(url) {
+  let resp;
+  try {
+    // Try local proxy first (for localhost dev)
+    const s2Base = 'https://api.semanticscholar.org/graph/v1/';
+    if (url.startsWith(s2Base)) {
+      const proxyUrl = '/api/s2/' + url.slice(s2Base.length);
+      resp = await fetch(proxyUrl);
+      if (resp.ok) return resp;
+    }
+  } catch(e) { /* proxy not available, try direct */ }
+  try {
+    resp = await fetch(url);
+  } catch(e) {
+    throw new Error('Network error: check your internet connection');
+  }
+  if (resp.status === 429) throw new Error('Rate limited by S2 API. Wait 1 minute and try again.');
+  if (!resp.ok) throw new Error(`S2 error: ${resp.status}`);
+  return resp;
+}
+
+async function s2Search(query, limit = 20) {
+  const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount,references';
+  const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`;
+  const resp = await s2Fetch(url);
+  const data = await resp.json();
+  return (data.data || []).map(parseS2Paper);
+}
+
+async function s2GetPaper(paperId) {
+  const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount,references';
+  const url = `https://api.semanticscholar.org/graph/v1/paper/${paperId}?fields=${fields}`;
+  try {
+    const resp = await s2Fetch(url);
+    return parseS2Paper(await resp.json());
+  } catch(e) { return null; }
+}
+
+function parseS2Paper(d) {
+  const authors = (d.authors || []).map(a => a.name).filter(Boolean);
+  const extIds = d.externalIds || {};
+  const refs = (d.references || []).filter(r => r && r.paperId).map(r => r.paperId);
+  return {
+    id: d.paperId || '',
+    title: d.title || '',
+    authors,
+    abstract: d.abstract || '',
+    year: d.year || 0,
+    venue: d.venue || '',
+    cited: d.citationCount || 0,
+    arxivId: extIds.ArXiv || '',
+    references: refs,
+    topic: '',
+    color: '',
+    x: 0, y: 0, vx: 0, vy: 0,
+  };
+}
+
+// ── OpenAI API ──
+async function callOpenAI(system, user, json_mode = false) {
+  const key = getOpenAIKey();
+  if (!key) throw new Error('OpenAI API key not set. Go to Settings.');
+  const body = {
+    model: getOpenAIModel(),
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+  };
+  if (json_mode) body.response_format = { type: 'json_object' };
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `OpenAI error: ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.choices[0].message.content || '';
+}
+
+// ── Search ──
+async function doSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+  const el = document.getElementById('search-results');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Searching top papers...</div>';
+
+  try {
+    // Step 1: Get top 20 seed papers
+    const seeds = await s2Search(query, 20);
+    if (!seeds.length) { el.innerHTML = '<p style="color:var(--text2)">No results.</p>'; return; }
+
+    // Step 2: Fetch full details (references) for each seed
+    el.innerHTML = '<div class="loading"><span class="spinner"></span>Fetching references...</div>';
+    for (const seed of seeds) {
+      if (!seed.references.length) {
+        await sleep(500);
+        try {
+          const full = await s2GetPaper(seed.id);
+          if (full) seed.references = full.references;
+        } catch(e) { /* skip */ }
+      }
+    }
+
+    // Step 3: Collect all unique referenced paper IDs
+    const refIds = new Set();
+    for (const seed of seeds) {
+      for (const refId of seed.references) {
+        if (!paperMap[refId]) refIds.add(refId);
+      }
+    }
+
+    // Step 4: Fetch details for referenced papers (batch, max 100)
+    const refIdsArr = [...refIds].slice(0, 100);
+    el.innerHTML = `<div class="loading"><span class="spinner"></span>Fetching ${refIdsArr.length} referenced papers...</div>`;
+    const refPapers = [];
+    for (const id of refIdsArr) {
+      await sleep(300);
+      try {
+        const p = await s2GetPaper(id);
+        if (p && p.title && p.abstract) refPapers.push(p);
+      } catch(e) { /* skip */ }
+    }
+
+    // Step 5: LLM filters — which references are core to this topic?
+    if (refPapers.length > 0 && getOpenAIKey()) {
+      el.innerHTML = `<div class="loading"><span class="spinner"></span>LLM filtering ${refPapers.length} papers...</div>`;
+      const filtered = await llmFilterPapers(query, refPapers);
+      // Add seeds + filtered refs
+      addPapers(seeds, query);
+      addPapers(filtered, query);
+      renderPaperList(el, [...seeds, ...filtered]);
+    } else {
+      // No API key — just add seeds
+      addPapers(seeds, query);
+      renderPaperList(el, seeds);
+    }
+  } catch (e) {
+    el.innerHTML = `<p style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+async function llmFilterPapers(topic, candidates) {
+  const langInst = getLang() === 'ja' ? 'Write reasons in Japanese.' : 'Write reasons in English.';
+  const papersText = candidates.map((p, i) =>
+    `[${i+1}] ${p.title} (${p.year})\n    Abstract: ${(p.abstract || '').slice(0, 200)}`
+  ).join('\n\n');
+
+  try {
+    const resp = await callOpenAI(
+      `You are a research expert. Select only papers that are core and essential to the research topic. Be strict — reject tangential or generic methodology papers. Respond only with valid JSON. ${langInst}`,
+      `Topic: "${topic}"\n\nCandidate papers:\n${papersText}\n\nSelect ONLY papers that are essential to understanding "${topic}". Return their indices.\n\nJSON: {"selected":[{"index":1,"reason":"..."}]}`,
+      true
+    );
+    const data = JSON.parse(resp);
+    const selected = (data.selected || []);
+    return selected
+      .map(s => { const idx = s.index - 1; return idx >= 0 && idx < candidates.length ? candidates[idx] : null; })
+      .filter(Boolean);
+  } catch(e) {
+    console.error('LLM filter failed:', e);
+    return [];
+  }
+}
+
+function renderPaperList(el, list) {
+  el.innerHTML = '';
+  if (!list.length) { el.innerHTML = '<p style="color:var(--text2)">No results.</p>'; return; }
+  list.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'paper-item';
+    const score = p._score != null ? `<span class="score">${p._score}</span>` : '';
+    const reason = p._reason ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">${p._reason}</div>` : '';
+    div.innerHTML = `${score}<h3>${p.title}</h3><div class="meta">${p.authors.slice(0,3).join(', ')} (${p.year}) &middot; Cited: ${p.cited}</div>${reason}`;
+    div.onclick = () => highlightNode(p.id);
+    el.appendChild(div);
+  });
+}
+
+// ── Survey ──
+async function doSuggestKeywords() {
+  const title = document.getElementById('my-title').value.trim();
+  const abstract = document.getElementById('my-abstract').value.trim();
+  if (!title) { alert('Enter your research title.'); return; }
+
+  const area = document.getElementById('keyword-area');
+  area.innerHTML = '<div class="loading"><span class="spinner"></span>Suggesting keywords...</div>';
+
+  const langInst = getLang() === 'ja' ? 'Write in Japanese.' : 'Write in English.';
+  try {
+    const resp = await callOpenAI(
+      `You are a research advisor. Suggest search keywords. Respond only with valid JSON. ${langInst}`,
+      `Given this research:\nTitle: ${title}\nAbstract: ${abstract}\n\nSuggest 5-8 search keywords for finding related papers. Include direct and adjacent fields.\n\nJSON format: {"keywords":[{"keyword":"...","reason":"..."}]}`,
+      true
+    );
+    const data = JSON.parse(resp);
+    const keywords = data.keywords || [];
+    area.innerHTML = '<div class="keyword-chips"></div>';
+    const chips = area.querySelector('.keyword-chips');
+    keywords.forEach(k => {
+      const chip = document.createElement('span');
+      chip.className = 'chip selected';
+      chip.textContent = k.keyword;
+      chip.title = k.reason;
+      chip.onclick = () => chip.classList.toggle('selected');
+      chips.appendChild(chip);
+    });
+  } catch (e) {
+    area.innerHTML = `<p style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+async function doCollectSelected() {
+  const chips = document.querySelectorAll('#keyword-area .chip.selected');
+  if (!chips.length) { alert('Select keywords first (use Suggest Keywords).'); return; }
+
+  const el = document.getElementById('survey-results');
+  const keywords = Array.from(chips).map(c => c.textContent);
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Collecting papers...</div>';
+
+  let allResults = [];
+  for (const kw of keywords) {
+    el.innerHTML = `<div class="loading"><span class="spinner"></span>Searching: ${kw}...</div>`;
+    try {
+      const results = await s2Search(kw, 10);
+      // fetch refs (skip on error, continue)
+      for (const r of results) {
+        if (!r.references.length) {
+          await sleep(500);
+          try {
+            const full = await s2GetPaper(r.id);
+            if (full) r.references = full.references;
+          } catch(e) { /* skip */ }
+        }
+      }
+      addPapers(results, kw);
+      allResults = allResults.concat(results);
+    } catch(e) {
+      el.innerHTML = `<div class="loading"><span class="spinner"></span>${kw}: rate limited, waiting...</div>`;
+      await sleep(3000);
+      try {
+        const results = await s2Search(kw, 10);
+        addPapers(results, kw);
+        allResults = allResults.concat(results);
+      } catch(e2) { /* skip this keyword */ }
+    }
+    await sleep(1000);  // throttle between keywords
+  }
+  // dedupe
+  const seen = new Set();
+  allResults = allResults.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+  renderPaperList(el, allResults);
+}
+
+async function doRankPapers() {
+  const title = document.getElementById('my-title').value.trim();
+  const abstract = document.getElementById('my-abstract').value.trim();
+  if (!title) { alert('Enter your research title.'); return; }
+  if (!papers.length) { alert('Collect papers first.'); return; }
+
+  const el = document.getElementById('survey-results');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Ranking papers by relevance...</div>';
+
+  const langInst = getLang() === 'ja' ? 'Write in Japanese.' : 'Write in English.';
+  const papersText = papers.slice(0, 30).map((p, i) =>
+    `[${i+1}] ${p.title} (${p.year})\n    Abstract: ${(p.abstract || '').slice(0, 300)}`
+  ).join('\n\n');
+
+  try {
+    const resp = await callOpenAI(
+      `You are a research advisor assessing paper relevance. Be strict. Respond only with valid JSON. ${langInst}`,
+      `My research:\nTitle: ${title}\nAbstract: ${abstract}\n\nPapers:\n${papersText}\n\nScore each 0-10, only include >= 4, sort desc.\nJSON: {"ranked":[{"index":1,"score":9,"reason":"..."}]}`,
+      true
+    );
+    const data = JSON.parse(resp);
+    const ranked = data.ranked || [];
+    const rankedPapers = ranked.map(r => {
+      const idx = r.index - 1;
+      if (idx >= 0 && idx < papers.length) {
+        const p = { ...papers[idx] };
+        p._score = r.score;
+        p._reason = r.reason;
+        return p;
+      }
+      return null;
+    }).filter(Boolean);
+    renderPaperList(el, rankedPapers);
+  } catch (e) {
+    el.innerHTML = `<p style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+// ── Related Work ──
+async function doGenerateRW() {
+  const title = document.getElementById('rw-title').value.trim();
+  const abstract = document.getElementById('rw-abstract').value.trim();
+  if (!title) { alert('Enter your research title.'); return; }
+  if (!papers.length) { alert('Collect papers first (use Search or Survey tab).'); return; }
+
+  const out = document.getElementById('rw-output');
+  out.style.display = 'block';
+  out.textContent = 'Generating Related Work...';
+
+  const langInst = getLang() === 'ja' ? 'Write all text in Japanese.' : 'Write all text in English.';
+  const papersText = papers.filter(p => p.abstract).slice(0, 30).map((p, i) =>
+    `[${i+1}] ${p.title} (${p.authors.slice(0,3).join(', ')}, ${p.year})\n    Abstract: ${(p.abstract).slice(0, 500)}`
+  ).join('\n\n');
+
+  try {
+    const resp = await callOpenAI(
+      `You are an expert academic writer. Write clear, well-structured Related Work sections. ${langInst}`,
+      `Write a Related Work section for my paper.\n\nMy Research:\nTitle: ${title}\nAbstract: ${abstract}\n\nCollected Papers:\n${papersText}\n\nInstructions:\n- Identify most relevant papers and explain how they relate\n- Group thematically\n- Explain the gap my research fills\n- Use: AuthorLastName et al. (Year)\n- 3-5 paragraphs, scholarly tone\n\nWrite directly (no JSON, no headers).`
+    );
+    out.textContent = resp;
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Paper & Graph Management ──
+
+// Year-based color: old=cool blue → new=warm orange/red
+function yearToColor(year) {
+  if (!year) return '#666';
+  const minY = 2000, maxY = new Date().getFullYear();
+  const t = Math.max(0, Math.min(1, (year - minY) / (maxY - minY)));
+  // Blue(old) → Cyan → Green → Yellow → Orange(new)
+  const r = Math.round(40 + t * 215);
+  const g = Math.round(60 + (t < 0.5 ? t * 2 * 180 : (1 - t) * 2 * 180 + 40));
+  const b = Math.round(180 - t * 160);
+  return `rgb(${r},${g},${b})`;
+}
+
+function addPaperToGraph(p, topic) {
+  if (paperMap[p.id]) return;
+  p.topic = topic;
+  p.color = yearToColor(p.year);
+  p.x = canvas.width / dpr / 2 + (Math.random() - 0.5) * 300;
+  p.y = canvas.height / dpr / 2 + (Math.random() - 0.5) * 300;
+  p.vx = 0; p.vy = 0;
+  papers.push(p);
+  paperMap[p.id] = p;
+}
+
+function addPapers(newPapers, topic) {
+  for (const p of newPapers) {
+    addPaperToGraph(p, topic);
+  }
+  rebuildEdges();
+  updateLegend();
+  savePapersToStorage();
+}
+
+// ── Persistence ──
+function savePapersToStorage() {
+  const data = papers.map(p => ({
+    id: p.id, title: p.title, authors: p.authors, abstract: p.abstract,
+    year: p.year, venue: p.venue, cited: p.cited, arxivId: p.arxivId,
+    references: p.references, topic: p.topic, color: p.color,
+  }));
+  localStorage.setItem('pc_papers', JSON.stringify(data));
+}
+
+function loadPapersFromStorage() {
+  const raw = localStorage.getItem('pc_papers');
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    for (const p of data) {
+      if (paperMap[p.id]) continue;
+      p.color = yearToColor(p.year);
+      p.x = canvas.width / dpr / 2 + (Math.random() - 0.5) * 300;
+      p.y = canvas.height / dpr / 2 + (Math.random() - 0.5) * 300;
+      p.vx = 0; p.vy = 0;
+      papers.push(p);
+      paperMap[p.id] = p;
+    }
+    rebuildEdges();
+    updateLegend();
+  } catch(e) { /* ignore corrupt data */ }
+}
+
+function rebuildEdges() {
+  graphEdges = [];
+  const seen = new Set();
+
+  // 1) Direct citation edges
+  for (const p of papers) {
+    for (const refId of p.references) {
+      if (paperMap[refId] && !seen.has(p.id + '-' + refId)) {
+        graphEdges.push({ s: p, t: paperMap[refId], type: 'cite' });
+        seen.add(p.id + '-' + refId);
+      }
+    }
+  }
+
+  // 2) Similarity edges (bibliographic coupling + co-citation combined)
+  //    Compute a combined similarity score for each paper pair
+  const simScores = {};  // "idA|idB" → score
+  const pairKey = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+
+  // Bibliographic coupling: shared references
+  for (let i = 0; i < papers.length; i++) {
+    const refsA = new Set(papers[i].references);
+    if (refsA.size === 0) continue;
+    for (let j = i + 1; j < papers.length; j++) {
+      const refsB = papers[j].references;
+      if (refsB.length === 0) continue;
+      let shared = 0;
+      for (const r of refsB) { if (refsA.has(r)) shared++; }
+      if (shared >= 2) {
+        const key = pairKey(papers[i].id, papers[j].id);
+        simScores[key] = (simScores[key] || 0) + shared;
+      }
+    }
+  }
+
+  // Co-citation: papers cited together by others in our set
+  const citedBy = {};
+  for (const p of papers) {
+    for (const refId of p.references) {
+      if (!citedBy[refId]) citedBy[refId] = [];
+      citedBy[refId].push(p);
+    }
+  }
+  for (const citing of Object.values(citedBy)) {
+    if (citing.length < 2) continue;
+    for (let i = 0; i < citing.length; i++) {
+      for (let j = i + 1; j < citing.length; j++) {
+        const key = pairKey(citing[i].id, citing[j].id);
+        simScores[key] = (simScores[key] || 0) + 1;
+      }
+    }
+  }
+
+  // Add similarity edges for pairs with high enough combined score
+  for (const [key, score] of Object.entries(simScores)) {
+    if (score >= 5) {
+      const [idA, idB] = key.split('|');
+      const edgeKey = idA + '-' + idB;
+      if (!seen.has(edgeKey) && !seen.has(idB + '-' + idA) && paperMap[idA] && paperMap[idB]) {
+        const strength = Math.min(1, score / 15);
+        graphEdges.push({ s: paperMap[idA], t: paperMap[idB], type: 'similar', strength });
+        seen.add(edgeKey);
+      }
+    }
+  }
+}
+
+function updateLegend() {
+  if (!papers.length) return;
+  const chart = document.getElementById('year-chart');
+  const labels = document.getElementById('year-labels');
+  chart.innerHTML = '';
+  labels.innerHTML = '';
+
+  // Count papers by year
+  const yearCount = {};
+  for (const p of papers) {
+    if (p.year) yearCount[p.year] = (yearCount[p.year] || 0) + 1;
+  }
+  const years = Object.keys(yearCount).map(Number).sort();
+  if (!years.length) return;
+
+  const minY = years[0], maxY = years[years.length - 1];
+  const maxCount = Math.max(...Object.values(yearCount));
+
+  // Fill in missing years
+  for (let y = minY; y <= maxY; y++) {
+    const count = yearCount[y] || 0;
+    const h = count > 0 ? Math.max(4, (count / maxCount) * 55) : 0;
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.height = h + 'px';
+    bar.style.flex = '1';
+    bar.style.background = yearToColor(y);
+    bar.setAttribute('data-label', `${y}: ${count} papers`);
+    chart.appendChild(bar);
+  }
+
+  labels.innerHTML = `<span>${minY}</span><span>${maxY}</span>`;
+}
+
+// ── Graph Rendering ──
+const canvas = document.getElementById('graph-canvas');
+const ctx = canvas.getContext('2d');
+const dpr = window.devicePixelRatio || 1;
+let W, H;
+
+function resizeCanvas() {
+  const main = document.getElementById('main');
+  W = main.clientWidth; H = main.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+let camX = 0, camY = 0, zoom = 1;
+const minCited = () => Math.min(...papers.map(n => n.cited), 0);
+const maxCited = () => Math.max(...papers.map(n => n.cited), 1);
+function nodeR(n) {
+  const mn = minCited(), mx = maxCited();
+  return 5 + (mx > mn ? ((n.cited - mn) / (mx - mn)) * 15 : 5);
+}
+
+function screenToWorld(sx, sy) {
+  return [(sx - W/2) / zoom + W/2 - camX, (sy - H/2) / zoom + H/2 - camY];
+}
+
+function simulate() {
+  if (!papers.length) return;
+  const alpha = 0.3, repulsion = 3000, linkDist = 120, linkStr = 0.01, centerStr = 0.005, damping = 0.85;
+  const cx = W / 2, cy = H / 2;
+
+  for (let i = 0; i < papers.length; i++) {
+    for (let j = i + 1; j < papers.length; j++) {
+      let dx = papers[j].x - papers[i].x, dy = papers[j].y - papers[i].y;
+      let d2 = dx*dx + dy*dy; if (d2 < 1) d2 = 1;
+      let f = repulsion / d2;
+      let fx = dx / Math.sqrt(d2) * f, fy = dy / Math.sqrt(d2) * f;
+      papers[i].vx -= fx * alpha; papers[i].vy -= fy * alpha;
+      papers[j].vx += fx * alpha; papers[j].vy += fy * alpha;
+    }
+  }
+  for (const e of graphEdges) {
+    let dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
+    let d = Math.sqrt(dx*dx + dy*dy) || 1;
+    // Citation: full strength. Similarity: weaker, proportional to strength
+    const str = e.type === 'cite' ? linkStr : linkStr * 0.4 * (e.strength || 0.3);
+    const dist = e.type === 'cite' ? linkDist : linkDist * 1.5;
+    let f = (d - dist) * str * alpha;
+    let fx = dx/d*f, fy = dy/d*f;
+    e.s.vx += fx; e.s.vy += fy; e.t.vx -= fx; e.t.vy -= fy;
+  }
+  for (const n of papers) {
+    n.vx += (cx - n.x) * centerStr * alpha; n.vy += (cy - n.y) * centerStr * alpha;
+    n.vx *= damping; n.vy *= damping;
+    n.x += n.vx; n.y += n.vy;
+  }
+}
+
+let hoveredNode = null;
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W/2, H/2); ctx.scale(zoom, zoom); ctx.translate(-W/2 + camX, -H/2 + camY);
+
+  // Edges — citation only
+  ctx.strokeStyle = 'rgba(140,180,255,0.5)'; ctx.lineWidth = 1.2;
+  for (const e of graphEdges) {
+    if (e.type === 'cite') {
+      ctx.beginPath(); ctx.moveTo(e.s.x, e.s.y); ctx.lineTo(e.t.x, e.t.y); ctx.stroke();
+    }
+  }
+
+  // Nodes
+  for (const n of papers) {
+    const r = nodeR(n);
+    if (n === hoveredNode) { ctx.beginPath(); ctx.arc(n.x, n.y, r+4, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill(); }
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2); ctx.fillStyle = n.color; ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#ccc'; ctx.font = '10px -apple-system, sans-serif'; ctx.fillText(nodeLabel(n), n.x + r + 4, n.y + 3);
+  }
+  ctx.restore();
+}
+
+function nodeLabel(n) {
+  const last = (n.authors && n.authors[0]) ? n.authors[0].split(' ').pop() : '?';
+  const suffix = n.authors && n.authors.length > 1 ? ' et al.' : '';
+  return `${last}${suffix} ${n.year || ''}`;
+}
+
+// ── Interaction ──
+let dragging = null, isPanning = false, panSX = 0, panSY = 0, camSX = 0, camSY = 0;
+
+function findNode(mx, my) {
+  const [wx, wy] = screenToWorld(mx, my);
+  for (let i = papers.length - 1; i >= 0; i--) {
+    const n = papers[i], r = nodeR(n);
+    if ((wx-n.x)**2 + (wy-n.y)**2 <= (r+4)**2) return n;
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e => {
+  const n = findNode(e.offsetX, e.offsetY);
+  if (n) { dragging = n; const [wx,wy] = screenToWorld(e.offsetX, e.offsetY); dragging._ox = n.x-wx; dragging._oy = n.y-wy; }
+  else { isPanning = true; panSX = e.offsetX; panSY = e.offsetY; camSX = camX; camSY = camY; }
+});
+canvas.addEventListener('mousemove', e => {
+  if (dragging) { const [wx,wy] = screenToWorld(e.offsetX, e.offsetY); dragging.x = wx+dragging._ox; dragging.y = wy+dragging._oy; dragging.vx=0; dragging.vy=0; }
+  else if (isPanning) { camX = camSX + (e.offsetX - panSX)/zoom; camY = camSY + (e.offsetY - panSY)/zoom; }
+  else { hoveredNode = findNode(e.offsetX, e.offsetY); canvas.style.cursor = hoveredNode ? 'pointer' : 'grab'; }
+});
+canvas.addEventListener('mouseup', () => { dragging = null; isPanning = false; });
+canvas.addEventListener('click', e => {
+  const n = findNode(e.offsetX, e.offsetY);
+  const info = document.getElementById('node-info');
+  if (n) {
+    info.style.display = 'block';
+    document.getElementById('ni-title').textContent = n.title;
+    document.getElementById('ni-authors').textContent = n.authors.slice(0,8).join(', ') + (n.authors.length > 8 ? ' et al.' : '');
+    const venue = n.venue ? n.venue + ', ' : '';
+    document.getElementById('ni-venue-year').textContent = `${venue}${n.year}`;
+    document.getElementById('ni-cited').textContent = `Cited by ${n.cited} papers`;
+    // Links
+    const linksEl = document.getElementById('ni-links');
+    linksEl.innerHTML = '';
+    if (n.arxivId) {
+      const a = document.createElement('a');
+      a.href = `https://arxiv.org/abs/${n.arxivId}`;
+      a.target = '_blank';
+      a.textContent = 'arXiv';
+      linksEl.appendChild(a);
+      const pdf = document.createElement('a');
+      pdf.href = `https://arxiv.org/pdf/${n.arxivId}`;
+      pdf.target = '_blank';
+      pdf.textContent = 'PDF';
+      linksEl.appendChild(pdf);
+    }
+    if (n.id) {
+      const s2 = document.createElement('a');
+      s2.href = `https://www.semanticscholar.org/paper/${n.id}`;
+      s2.target = '_blank';
+      s2.className = 's2-link';
+      s2.textContent = 'Semantic Scholar';
+      linksEl.appendChild(s2);
+    }
+    document.getElementById('ni-abstract').textContent = n.abstract || 'No abstract available.';
+  } else { info.style.display = 'none'; }
+});
+canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.1, Math.min(5, zoom * (e.deltaY > 0 ? 0.9 : 1.1))); }, { passive: false });
+
+function highlightNode(id) {
+  const n = paperMap[id];
+  if (n) { camX = W/2 - n.x; camY = H/2 - n.y; }
+}
+
+// ── Utils ──
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Loop ──
+function loop() { simulate(); draw(); requestAnimationFrame(loop); }
+loadSettings();
+loadPapersFromStorage();
+loop();
+</script>
+</body>
+</html>

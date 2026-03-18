@@ -1,0 +1,24 @@
+# Paper Copilot Configuration
+
+# OpenAI API (for paper analysis/summarization)
+openai_api_key: "sk-..."
+openai_model: "gpt-4o-mini"
+
+# Semantic Scholar API (for citation/reference graph)
+semantic_scholar_api_key: ""
+
+# arXiv settings
+arxiv_categories:
+  - "cs.AI"
+  - "cs.CL"
+arxiv_fetch_days: 7
+arxiv_max_results: 50
+
+# Data
+database_path: "./data/papers.db"
+
+# Obsidian vault output
+obsidian_vault_path: "./vault"
+
+# Language (ja or en)
+language: "ja"

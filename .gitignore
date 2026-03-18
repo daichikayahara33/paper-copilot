@@ -1,0 +1,8 @@
+config.yaml
+data/
+vault/
+.venv/
+__pycache__/
+*.egg-info/
+*.pyc
+.DS_Store
