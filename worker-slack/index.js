@@ -331,13 +331,9 @@ function generateGraphPNG(papers, query) {
   // Title
   svg += `<text x="${W/2}" y="30" text-anchor="middle" fill="#e0e0f0" font-family="Noto Sans,sans-serif" font-size="18" font-weight="bold">Paper Copilot — "${escXml(query)}"</text>`;
 
-  // Edges
+  // Edges (all blue)
   for (const e of visibleEdges) {
-    const color = e.type === "cite" ? "rgba(140,180,255,0.6)" :
-                  e.type === "coauthor" ? "rgba(255,200,100,0.5)" :
-                  "rgba(140,255,180,0.35)";
-    const width = e.type === "cite" ? 1.8 : 1.2;
-    svg += `<line x1="${nodes[e.s].x}" y1="${nodes[e.s].y}" x2="${nodes[e.t].x}" y2="${nodes[e.t].y}" stroke="${color}" stroke-width="${width}"/>`;
+    svg += `<line x1="${nodes[e.s].x}" y1="${nodes[e.s].y}" x2="${nodes[e.t].x}" y2="${nodes[e.t].y}" stroke="rgba(140,180,255,0.5)" stroke-width="1.5"/>`;
   }
 
   // Nodes + labels
