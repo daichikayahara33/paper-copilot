@@ -5,8 +5,8 @@ export default {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'x-s2-key',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, x-s2-key',
           'Access-Control-Max-Age': '86400',
         },
       });
@@ -22,7 +22,14 @@ export default {
       reqHeaders['x-api-key'] = s2Key;
     }
 
-    const resp = await fetch(s2Url, { headers: reqHeaders });
+    // Forward POST body for batch endpoint
+    const fetchOpts = { headers: reqHeaders, method: request.method };
+    if (request.method === 'POST') {
+      reqHeaders['Content-Type'] = 'application/json';
+      fetchOpts.body = await request.text();
+    }
+
+    const resp = await fetch(s2Url, fetchOpts);
 
     const headers = new Headers(resp.headers);
     headers.set('Access-Control-Allow-Origin', '*');

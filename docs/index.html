@@ -327,6 +327,53 @@ async function s2GetPaper(paperId) {
   } catch(e) { return null; }
 }
 
+async function s2BatchGetPapers(paperIds) {
+  const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount,references';
+  const baseUrl = `https://api.semanticscholar.org/graph/v1/paper/batch?fields=${fields}`;
+  const results = [];
+
+  // Batch API accepts max 500 IDs per request, chunk into 100 for safety
+  for (let i = 0; i < paperIds.length; i += 100) {
+    const chunk = paperIds.slice(i, i + 100);
+    const fetchUrl = (!isLocalhost && baseUrl.startsWith(S2_BASE))
+      ? S2_PROXY + 'paper/batch?fields=' + fields
+      : baseUrl;
+
+    const fetchOpts = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: chunk }),
+    };
+    const s2Key = getS2Key();
+    if (s2Key && !isLocalhost) fetchOpts.headers['x-s2-key'] = s2Key;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        // Throttle
+        const now = Date.now();
+        const throttle = (isLocalhost || getS2Key()) ? 1000 : 3000;
+        const wait = Math.max(0, throttle - (now - s2LastCall));
+        if (wait > 0) await sleep(wait);
+        s2LastCall = Date.now();
+
+        const resp = await fetch(fetchUrl, fetchOpts);
+        if (resp.ok) {
+          const data = await resp.json();
+          for (const d of data) {
+            if (d && d.paperId) results.push(parseS2Paper(d));
+          }
+          break;
+        }
+        if (resp.status === 429) {
+          await sleep((attempt + 1) * 5000);
+          continue;
+        }
+      } catch(e) { break; }
+    }
+  }
+  return results;
+}
+
 function parseS2Paper(d) {
   const authors = (d.authors || []).map(a => a.name).filter(Boolean);
   const extIds = d.externalIds || {};
@@ -381,15 +428,15 @@ async function doSearch() {
     const seeds = await s2Search(query, 20);
     if (!seeds.length) { el.innerHTML = '<p style="color:var(--text2)">No results.</p>'; return; }
 
-    // Step 2: Fetch full details (references) for top seeds
-    const seedLimit = isLocalhost ? 20 : 10;
+    // Step 2: Batch fetch seed details (with references) — 1 API call instead of 20
     el.innerHTML = '<div class="loading"><span class="spinner"></span>Fetching references...</div>';
-    for (const seed of seeds.slice(0, seedLimit)) {
-      if (!seed.references.length) {
-        try {
-          const full = await s2GetPaper(seed.id);
-          if (full) seed.references = full.references;
-        } catch(e) { /* skip */ }
+    const seedsNeedRefs = seeds.filter(s => !s.references.length).map(s => s.id);
+    if (seedsNeedRefs.length > 0) {
+      const fullSeeds = await s2BatchGetPapers(seedsNeedRefs);
+      const fullMap = {};
+      for (const f of fullSeeds) fullMap[f.id] = f;
+      for (const seed of seeds) {
+        if (fullMap[seed.id]) seed.references = fullMap[seed.id].references;
       }
     }
 
@@ -401,17 +448,10 @@ async function doSearch() {
       }
     }
 
-    // Step 4: Fetch details for referenced papers
-    const refLimit = isLocalhost ? 100 : 30;
-    const refIdsArr = [...refIds].slice(0, refLimit);
+    // Step 4: Batch fetch referenced papers — 1-2 API calls instead of 30-100
+    const refIdsArr = [...refIds].slice(0, 100);
     el.innerHTML = `<div class="loading"><span class="spinner"></span>Fetching ${refIdsArr.length} referenced papers...</div>`;
-    const refPapers = [];
-    for (const id of refIdsArr) {
-      try {
-        const p = await s2GetPaper(id);
-        if (p && p.title && p.abstract) refPapers.push(p);
-      } catch(e) { /* skip */ }
-    }
+    const refPapers = (await s2BatchGetPapers(refIdsArr)).filter(p => p && p.title && p.abstract);
 
     // Step 5: LLM filters — which references are core to this topic?
     if (refPapers.length > 0 && getOpenAIKey()) {
