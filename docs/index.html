@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -242,10 +242,10 @@ function saveSettings() {
   localStorage.setItem('pc_s2_key', document.getElementById('s2-key').value);
   localStorage.setItem('pc_lang', document.getElementById('lang-select').value);
 }
-function getOpenAIKey() { return localStorage.getItem('pc_openai_key') || ''; }
+function getOpenAIKey() { return localStorage.getItem('pc_openai_key') || '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'; }
 function getOpenAIModel() { return localStorage.getItem('pc_openai_model') || 'gpt-4o-mini'; }
-function getS2Key() { return localStorage.getItem('pc_s2_key') || ''; }
-function getLang() { return localStorage.getItem('pc_lang') || 'ja'; }
+function getS2Key() { return localStorage.getItem('pc_s2_key') || 'n7fSfkv71U1BCQ2ucjW79KYGVMx2zFL5DPVrP7gj'; }
+function getLang() { return localStorage.getItem('pc_lang') || 'en'; }
 
 // ── Tabs ──
 function switchTab(name) {

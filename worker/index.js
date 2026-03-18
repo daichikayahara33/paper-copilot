@@ -15,9 +15,10 @@ export default {
     const url = new URL(request.url);
     const s2Url = 'https://api.semanticscholar.org/graph/v1' + url.pathname + url.search;
 
-    // Forward S2 API key if provided
+    // Always attach S2 API key; allow override via header
+    const S2_KEY = 'n7fSfkv71U1BCQ2ucjW79KYGVMx2zFL5DPVrP7gj';
     const reqHeaders = { 'User-Agent': 'PaperCopilot/1.0' };
-    const s2Key = request.headers.get('x-s2-key');
+    const s2Key = request.headers.get('x-s2-key') || S2_KEY;
     if (s2Key) {
       reqHeaders['x-api-key'] = s2Key;
     }
