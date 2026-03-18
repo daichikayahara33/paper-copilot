@@ -273,9 +273,9 @@ async function s2Fetch(url) {
     } catch(e) { /* proxy not available, try direct */ }
   }
   try {
-    resp = await fetch(url);
+    resp = await fetch(url, { mode: 'cors' });
   } catch(e) {
-    throw new Error('Network error: check your internet connection');
+    throw new Error(`Network error: ${e.message}`);
   }
   if (resp.status === 429) throw new Error('Rate limited by S2 API. Wait 1 minute and try again.');
   if (!resp.ok) throw new Error(`S2 error: ${resp.status}`);
@@ -283,7 +283,7 @@ async function s2Fetch(url) {
 }
 
 async function s2Search(query, limit = 20) {
-  const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount,references';
+  const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount';
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`;
   const resp = await s2Fetch(url);
   const data = await resp.json();
