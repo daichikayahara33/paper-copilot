@@ -258,40 +258,43 @@ function switchTab(name) {
 
 // ── S2 API ──
 const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+const S2_BASE = 'https://api.semanticscholar.org/graph/v1/';
+const S2_PROXY = 'https://s2-proxy.d-kayahara33.workers.dev/';
 
 let s2LastCall = 0;
 
 async function s2Fetch(url) {
-  // Throttle: at least 1.5s between requests (avoid 429)
+  // Throttle: at least 1s between requests
   const now = Date.now();
-  const wait = Math.max(0, 1500 - (now - s2LastCall));
+  const wait = Math.max(0, 1000 - (now - s2LastCall));
   if (wait > 0) await sleep(wait);
   s2LastCall = Date.now();
 
   let resp;
-  // Use local proxy on localhost (dev server)
+  // On localhost: use local proxy server
   if (isLocalhost) {
     try {
-      const s2Base = 'https://api.semanticscholar.org/graph/v1/';
-      if (url.startsWith(s2Base)) {
-        const proxyUrl = '/api/s2/' + url.slice(s2Base.length);
-        resp = await fetch(proxyUrl);
+      if (url.startsWith(S2_BASE)) {
+        resp = await fetch('/api/s2/' + url.slice(S2_BASE.length));
         if (resp.ok) return resp;
       }
     } catch(e) { /* proxy not available */ }
   }
 
-  // Direct access with retry on 429
+  // On GitHub Pages: use Cloudflare Worker proxy
+  const fetchUrl = (!isLocalhost && url.startsWith(S2_BASE))
+    ? S2_PROXY + url.slice(S2_BASE.length)
+    : url;
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      resp = await fetch(url);
+      resp = await fetch(fetchUrl);
     } catch(e) {
       throw new Error(`Network error: ${e.message}`);
     }
     if (resp.ok) return resp;
     if (resp.status === 429) {
-      const retryDelay = (attempt + 1) * 5000;
-      await sleep(retryDelay);
+      await sleep((attempt + 1) * 3000);
       continue;
     }
     throw new Error(`S2 error: ${resp.status}`);
