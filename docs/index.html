@@ -91,6 +91,13 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Related queries */
+#related-queries { margin-bottom: 12px; }
+#related-queries .rq-label { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+#related-queries .rq-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#related-queries .rq-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s; color: var(--text); }
+#related-queries .rq-chip:hover { border-color: var(--accent); background: rgba(78,121,167,0.2); }
+
 /* Keyword chips */
 .keyword-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
@@ -134,6 +141,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
           <input id="search-input" placeholder="Search keyword..." onkeydown="if(event.key==='Enter')doSearch()">
           <button onclick="doSearch()" class="btn-primary">Search</button>
         </div>
+        <div id="related-queries"></div>
         <div id="search-results"></div>
       </div>
 
@@ -386,8 +394,43 @@ async function doSearch() {
       addPapers(seeds, query);
       renderPaperList(el, seeds);
     }
+    // Suggest related search queries (run in parallel, don't block)
+    if (getOpenAIKey()) suggestRelatedQueries(query, seeds);
+
   } catch (e) {
     el.innerHTML = `<p style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+async function suggestRelatedQueries(query, seeds) {
+  const rqEl = document.getElementById('related-queries');
+  rqEl.innerHTML = '<div class="rq-label">Suggesting related searches...</div>';
+
+  const seedTitles = seeds.slice(0, 10).map(s => s.title).join('\n');
+  try {
+    const resp = await callOpenAI(
+      'You are a research expert. Given a search query and some results, suggest related search terms that would find important papers NOT covered by the original query. Focus on: specific model/method names, alternative terminology, key authors\' systems, and subfield names. Return ONLY valid JSON.',
+      `Search query: "${query}"\n\nTop results found:\n${seedTitles}\n\nSuggest 5-8 related search queries that would find important related papers that "${query}" would miss. For example, if the query is "VLA" (Vision-Language-Action), suggest specific model names like "RT-2", "Pi0", "Octo" etc.\n\nJSON: {"queries":["term1","term2",...]}`,
+      true
+    );
+    const data = JSON.parse(resp);
+    const queries = data.queries || [];
+    if (queries.length === 0) { rqEl.innerHTML = ''; return; }
+
+    rqEl.innerHTML = '<div class="rq-label">Related searches</div><div class="rq-chips"></div>';
+    const chipsEl = rqEl.querySelector('.rq-chips');
+    for (const q of queries) {
+      const chip = document.createElement('button');
+      chip.className = 'rq-chip';
+      chip.textContent = q;
+      chip.onclick = () => {
+        document.getElementById('search-input').value = q;
+        doSearch();
+      };
+      chipsEl.appendChild(chip);
+    }
+  } catch (e) {
+    rqEl.innerHTML = '';
   }
 }
 
@@ -423,7 +466,12 @@ function renderPaperList(el, list) {
     const score = p._score != null ? `<span class="score">${p._score}</span>` : '';
     const reason = p._reason ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">${p._reason}</div>` : '';
     div.innerHTML = `${score}<h3>${p.title}</h3><div class="meta">${p.authors.slice(0,3).join(', ')} (${p.year}) &middot; Cited: ${p.cited}</div>${reason}`;
-    div.onclick = () => highlightNode(p.id);
+    div.setAttribute('data-paper-id', p.id);
+    div.onclick = () => {
+      document.querySelectorAll('.paper-item.selected').forEach(el => el.classList.remove('selected'));
+      div.classList.add('selected');
+      highlightNode(p.id);
+    };
     el.appendChild(div);
   });
 }
@@ -792,7 +840,7 @@ function simulate() {
   }
 }
 
-let hoveredNode = null;
+let hoveredNode = null, selectedNode = null;
 function draw() {
   ctx.clearRect(0, 0, W, H);
   ctx.save();
@@ -809,10 +857,20 @@ function draw() {
   // Nodes
   for (const n of papers) {
     const r = nodeR(n);
-    if (n === hoveredNode) { ctx.beginPath(); ctx.arc(n.x, n.y, r+4, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill(); }
+    // Selected node: bright glow ring
+    if (n === selectedNode) {
+      ctx.save();
+      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = 20;
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.restore();
+    }
+    if (n === hoveredNode && n !== selectedNode) { ctx.beginPath(); ctx.arc(n.x, n.y, r+4, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill(); }
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2); ctx.fillStyle = n.color; ctx.fill();
-    ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#ccc'; ctx.font = '10px -apple-system, sans-serif'; ctx.fillText(nodeLabel(n), n.x + r + 4, n.y + 3);
+    ctx.strokeStyle = n === selectedNode ? '#fff' : '#222'; ctx.lineWidth = n === selectedNode ? 2 : 1.5; ctx.stroke();
+    ctx.fillStyle = n === selectedNode ? '#fff' : '#ccc'; ctx.font = n === selectedNode ? 'bold 11px -apple-system, sans-serif' : '10px -apple-system, sans-serif';
+    ctx.fillText(nodeLabel(n), n.x + r + 4, n.y + 3);
   }
   ctx.restore();
 }
@@ -848,6 +906,7 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mouseup', () => { dragging = null; isPanning = false; });
 canvas.addEventListener('click', e => {
   const n = findNode(e.offsetX, e.offsetY);
+  selectedNode = n || null;
   const info = document.getElementById('node-info');
   if (n) {
     info.style.display = 'block';
@@ -886,7 +945,28 @@ canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.1,
 
 function highlightNode(id) {
   const n = paperMap[id];
-  if (n) { camX = W/2 - n.x; camY = H/2 - n.y; }
+  if (n) {
+    selectedNode = n;
+    camX = W/2 - n.x; camY = H/2 - n.y;
+    // Show info panel
+    const info = document.getElementById('node-info');
+    info.style.display = 'block';
+    document.getElementById('ni-title').textContent = n.title;
+    document.getElementById('ni-authors').textContent = n.authors.slice(0,8).join(', ') + (n.authors.length > 8 ? ' et al.' : '');
+    const venue = n.venue ? n.venue + ', ' : '';
+    document.getElementById('ni-venue-year').textContent = `${venue}${n.year}`;
+    document.getElementById('ni-cited').textContent = `Cited by ${n.cited} papers`;
+    const linksEl = document.getElementById('ni-links');
+    linksEl.innerHTML = '';
+    if (n.arxivId) {
+      const a = document.createElement('a'); a.href = `https://arxiv.org/abs/${n.arxivId}`; a.target = '_blank'; a.textContent = 'arXiv'; linksEl.appendChild(a);
+      const pdf = document.createElement('a'); pdf.href = `https://arxiv.org/pdf/${n.arxivId}`; pdf.target = '_blank'; pdf.textContent = 'PDF'; linksEl.appendChild(pdf);
+    }
+    if (n.id) {
+      const s2 = document.createElement('a'); s2.href = `https://www.semanticscholar.org/paper/${n.id}`; s2.target = '_blank'; s2.className = 's2-link'; s2.textContent = 'Semantic Scholar'; linksEl.appendChild(s2);
+    }
+    document.getElementById('ni-abstract').textContent = n.abstract || 'No abstract available.';
+  }
 }
 
 // ── Utils ──
