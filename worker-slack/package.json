@@ -2,6 +2,7 @@
   "name": "paper-copilot-slack",
   "private": true,
   "dependencies": {
-    "@cloudflare/puppeteer": "^0.0.15"
+    "@cloudflare/puppeteer": "^0.0.15",
+    "@resvg/resvg-wasm": "^2.6.2"
   }
 }
