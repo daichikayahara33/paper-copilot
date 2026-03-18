@@ -30,11 +30,12 @@ export default {
         return jsonResponse({ text: "Usage: /papers <keyword>\nExample: /papers VLA" });
       }
 
-      ctx.waitUntil(handleQuery(env, text.trim(), null, responseUrl));
+      const { mode, keyword } = parseInput(text.trim());
+      ctx.waitUntil(handleQuery(env, keyword, null, responseUrl, mode));
 
       return jsonResponse({
         response_type: "in_channel",
-        text: `🔍 Searching papers for "${text.trim()}"...`,
+        text: `🔍 Searching papers for "${keyword}"...`,
       });
     }
 
@@ -52,7 +53,8 @@ export default {
         const botToken = env.SLACK_BOT_TOKEN;
 
         if (keyword && botToken) {
-          ctx.waitUntil(handleQuery(env, keyword, channel, null));
+          const parsed = parseInput(keyword);
+          ctx.waitUntil(handleQuery(env, parsed.keyword, channel, null, parsed.mode));
         }
         return new Response("ok");
       }
@@ -73,7 +75,16 @@ export default {
   },
 };
 
-async function handleQuery(env, query, channel, responseUrl) {
+// Parse "list VLA" → { mode: "list", keyword: "VLA" }
+// Parse "VLA" → { mode: "graph", keyword: "VLA" }
+function parseInput(text) {
+  if (text.startsWith("list ")) {
+    return { mode: "list", keyword: text.slice(5).trim() };
+  }
+  return { mode: "graph", keyword: text };
+}
+
+async function handleQuery(env, query, channel, responseUrl, mode = "graph") {
   const botToken = env.SLACK_BOT_TOKEN;
   const pageUrl = `${APP_URL}?q=${encodeURIComponent(query)}&fresh=1`;
 
@@ -87,35 +98,95 @@ async function handleQuery(env, query, channel, responseUrl) {
       return;
     }
 
-    // Generate graph PNG
-    const pngBuffer = generateGraphPNG(papers, query);
-
-    // Upload image to Slack
-    if (channel && botToken) {
-      await uploadSlackImage(botToken, channel, pngBuffer, query, pageUrl);
-    } else if (responseUrl) {
-      // For slash commands, post with external image URL
-      await sendSlackMessage(responseUrl, {
-        response_type: "in_channel",
-        text: `📊 Paper Citation Graph: "${query}"`,
-        blocks: [
-          {
-            type: "section",
-            text: { type: "mrkdwn", text: `📊 *Paper Citation Graph: "${query}"*\n<${pageUrl}|🔗 Open interactive graph>` },
-          },
-          {
-            type: "image",
-            image_url: `https://paper-copilot-slack.d-kayahara33.workers.dev/graph.png?q=${encodeURIComponent(query)}`,
-            alt_text: `Paper graph for ${query}`,
-          },
-        ],
-      });
+    if (mode === "list") {
+      // Text list mode
+      await sendListResult(papers, query, pageUrl, channel, responseUrl, botToken);
+    } else {
+      // Graph image mode
+      await sendGraphResult(env, papers, query, pageUrl, channel, responseUrl, botToken);
     }
 
   } catch (e) {
     const errMsg = `❌ Error: ${e.message}`;
     if (channel && botToken) await postSlackChat(botToken, channel, errMsg);
     else if (responseUrl) await sendSlackMessage(responseUrl, { response_type: "in_channel", text: errMsg });
+  }
+}
+
+async function sendGraphResult(env, papers, query, pageUrl, channel, responseUrl, botToken) {
+  const pngBuffer = generateGraphPNG(papers, query);
+
+  if (channel && botToken) {
+    await uploadSlackImage(botToken, channel, pngBuffer, query, pageUrl);
+  } else if (responseUrl) {
+    await sendSlackMessage(responseUrl, {
+      response_type: "in_channel",
+      text: `📊 Paper Citation Graph: "${query}"`,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `📊 *Paper Citation Graph: "${query}"*\n<${pageUrl}|🔗 Open interactive graph>` },
+        },
+        {
+          type: "image",
+          image_url: `https://paper-copilot-slack.d-kayahara33.workers.dev/graph.png?q=${encodeURIComponent(query)}`,
+          alt_text: `Paper graph for ${query}`,
+        },
+      ],
+    });
+  }
+}
+
+async function sendListResult(papers, query, pageUrl, channel, responseUrl, botToken) {
+  const blocks = [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `📊 *Paper Citation Graph: "${query}"*` },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "🔗 Open Interactive Graph" },
+          url: pageUrl,
+          action_id: "open_graph",
+        },
+      ],
+    },
+    { type: "divider" },
+  ];
+
+  for (let i = 0; i < Math.min(10, papers.length); i++) {
+    const p = papers[i];
+    const authors = p.authors.slice(0, 3).join(", ");
+    const arxivLink = p.arxivId ? ` | <https://arxiv.org/abs/${p.arxivId}|arXiv>` : "";
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${i + 1}. ${p.title}*\n${authors} (${p.year}) · Cited: ${p.cited}${arxivLink}`,
+      },
+    });
+  }
+
+  if (papers.length > 10) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `+${papers.length - 10} more papers. <${pageUrl}|View all in graph>` }],
+    });
+  }
+
+  const text = `📊 *Paper Citation Graph: "${query}"*\n<${pageUrl}|🔗 Open interactive graph>`;
+
+  if (channel && botToken) {
+    await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${botToken}` },
+      body: JSON.stringify({ channel, text, blocks }),
+    });
+  } else if (responseUrl) {
+    await sendSlackMessage(responseUrl, { response_type: "in_channel", text, blocks });
   }
 }
 
