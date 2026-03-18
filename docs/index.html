@@ -259,9 +259,17 @@ function switchTab(name) {
 // ── S2 API ──
 const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
+let s2LastCall = 0;
+
 async function s2Fetch(url) {
+  // Throttle: at least 1.5s between requests (avoid 429)
+  const now = Date.now();
+  const wait = Math.max(0, 1500 - (now - s2LastCall));
+  if (wait > 0) await sleep(wait);
+  s2LastCall = Date.now();
+
   let resp;
-  // Use proxy only on localhost (dev server)
+  // Use local proxy on localhost (dev server)
   if (isLocalhost) {
     try {
       const s2Base = 'https://api.semanticscholar.org/graph/v1/';
@@ -270,16 +278,25 @@ async function s2Fetch(url) {
         resp = await fetch(proxyUrl);
         if (resp.ok) return resp;
       }
-    } catch(e) { /* proxy not available, try direct */ }
+    } catch(e) { /* proxy not available */ }
   }
-  try {
-    resp = await fetch(url, { mode: 'cors' });
-  } catch(e) {
-    throw new Error(`Network error: ${e.message}`);
+
+  // Direct access with retry on 429
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      resp = await fetch(url);
+    } catch(e) {
+      throw new Error(`Network error: ${e.message}`);
+    }
+    if (resp.ok) return resp;
+    if (resp.status === 429) {
+      const retryDelay = (attempt + 1) * 5000;
+      await sleep(retryDelay);
+      continue;
+    }
+    throw new Error(`S2 error: ${resp.status}`);
   }
-  if (resp.status === 429) throw new Error('Rate limited by S2 API. Wait 1 minute and try again.');
-  if (!resp.ok) throw new Error(`S2 error: ${resp.status}`);
-  return resp;
+  throw new Error('Rate limited by S2 API. Wait a minute and try again.');
 }
 
 async function s2Search(query, limit = 20) {
@@ -353,11 +370,11 @@ async function doSearch() {
     const seeds = await s2Search(query, 20);
     if (!seeds.length) { el.innerHTML = '<p style="color:var(--text2)">No results.</p>'; return; }
 
-    // Step 2: Fetch full details (references) for each seed
+    // Step 2: Fetch full details (references) for top seeds
+    const seedLimit = isLocalhost ? 20 : 10;
     el.innerHTML = '<div class="loading"><span class="spinner"></span>Fetching references...</div>';
-    for (const seed of seeds) {
+    for (const seed of seeds.slice(0, seedLimit)) {
       if (!seed.references.length) {
-        await sleep(500);
         try {
           const full = await s2GetPaper(seed.id);
           if (full) seed.references = full.references;
@@ -373,12 +390,12 @@ async function doSearch() {
       }
     }
 
-    // Step 4: Fetch details for referenced papers (batch, max 100)
-    const refIdsArr = [...refIds].slice(0, 100);
+    // Step 4: Fetch details for referenced papers
+    const refLimit = isLocalhost ? 100 : 30;
+    const refIdsArr = [...refIds].slice(0, refLimit);
     el.innerHTML = `<div class="loading"><span class="spinner"></span>Fetching ${refIdsArr.length} referenced papers...</div>`;
     const refPapers = [];
     for (const id of refIdsArr) {
-      await sleep(300);
       try {
         const p = await s2GetPaper(id);
         if (p && p.title && p.abstract) refPapers.push(p);
