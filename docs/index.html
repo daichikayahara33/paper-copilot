@@ -177,17 +177,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
       <!-- Settings Tab -->
       <div id="tab-settings" style="display:none">
         <div class="settings-group">
-          <label>OpenAI API Key</label>
-          <input id="openai-key" type="password" placeholder="sk-..." oninput="saveSettings()">
-          <div id="openai-status" class="settings-status"></div>
-        </div>
-        <div class="settings-group">
           <label>OpenAI Model</label>
           <input id="openai-model" value="gpt-4o-mini" oninput="saveSettings()">
-        </div>
-        <div class="settings-group">
-          <label>Semantic Scholar API Key (optional)</label>
-          <input id="s2-key" type="password" placeholder="Optional..." oninput="saveSettings()">
         </div>
         <div class="settings-group">
           <label>Language</label>
@@ -199,7 +190,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
         <div class="settings-group" style="margin-top:24px">
           <button onclick="if(confirm('Clear all collected papers?')){localStorage.removeItem('pc_papers');papers=[];Object.keys(paperMap).forEach(k=>delete paperMap[k]);graphEdges=[];location.reload();}" style="background:var(--red);color:#fff">Clear All Papers</button>
         </div>
-        <p style="font-size:12px;color:var(--text2);margin-top:16px">Keys are stored in your browser's localStorage only. Never sent anywhere except the respective APIs.</p>
+        <p style="font-size:12px;color:var(--text2);margin-top:16px">API keys are managed server-side via Cloudflare Workers.</p>
       </div>
     </div>
   </div>
@@ -231,20 +222,16 @@ const paperMap = {};
 
 // ── Settings ──
 function loadSettings() {
-  document.getElementById('openai-key').value = localStorage.getItem('pc_openai_key') || '';
   document.getElementById('openai-model').value = localStorage.getItem('pc_openai_model') || 'gpt-4o-mini';
-  document.getElementById('s2-key').value = localStorage.getItem('pc_s2_key') || '';
-  document.getElementById('lang-select').value = localStorage.getItem('pc_lang') || 'ja';
+  document.getElementById('lang-select').value = localStorage.getItem('pc_lang') || 'en';
 }
 function saveSettings() {
-  localStorage.setItem('pc_openai_key', document.getElementById('openai-key').value);
   localStorage.setItem('pc_openai_model', document.getElementById('openai-model').value);
-  localStorage.setItem('pc_s2_key', document.getElementById('s2-key').value);
   localStorage.setItem('pc_lang', document.getElementById('lang-select').value);
 }
-function getOpenAIKey() { return localStorage.getItem('pc_openai_key') || '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'; }
+function getOpenAIKey() { return 'proxy'; }
 function getOpenAIModel() { return localStorage.getItem('pc_openai_model') || 'gpt-4o-mini'; }
-function getS2Key() { return localStorage.getItem('pc_s2_key') || 'n7fSfkv71U1BCQ2ucjW79KYGVMx2zFL5DPVrP7gj'; }
+function getS2Key() { return ''; } // S2 key is now in the Worker proxy
 function getLang() { return localStorage.getItem('pc_lang') || 'en'; }
 
 // ── Tabs ──
@@ -394,18 +381,18 @@ function parseS2Paper(d) {
   };
 }
 
-// ── OpenAI API ──
+// ── OpenAI API (via Cloudflare Worker proxy) ──
+const OPENAI_PROXY = 'https://s2-proxy.d-kayahara33.workers.dev/openai/';
+
 async function callOpenAI(system, user, json_mode = false) {
-  const key = getOpenAIKey();
-  if (!key) throw new Error('OpenAI API key not set. Go to Settings.');
   const body = {
     model: getOpenAIModel(),
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   };
   if (json_mode) body.response_format = { type: 'json_object' };
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  const resp = await fetch(OPENAI_PROXY + 'chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
