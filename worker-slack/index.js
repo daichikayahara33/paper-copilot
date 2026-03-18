@@ -213,17 +213,36 @@ function generateGraphPNG(papers, query) {
   const idToIdx = {};
   nodes.forEach((n, i) => { idToIdx[n.paper.id] = i; });
   const edges = [];
-  for (const n of nodes) {
-    for (const refId of (n.paper.references || [])) {
+  for (let i = 0; i < nodes.length; i++) {
+    for (const refId of (nodes[i].paper.references || [])) {
       if (idToIdx[refId] !== undefined) {
-        edges.push([nodes.indexOf(n), idToIdx[refId]]);
+        edges.push([i, idToIdx[refId]]);
       }
     }
   }
 
-  // Force simulation (200 iterations)
-  for (let iter = 0; iter < 200; iter++) {
-    const alpha = 0.3 * (1 - iter / 200);
+  // Build bibliographic coupling edges (shared references → attract in simulation)
+  const simEdges = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const refsI = new Set(nodes[i].paper.references || []);
+    if (refsI.size === 0) continue;
+    for (let j = i + 1; j < nodes.length; j++) {
+      const refsJ = nodes[j].paper.references || [];
+      if (refsJ.length === 0) continue;
+      let shared = 0;
+      for (const r of refsJ) { if (refsI.has(r)) shared++; }
+      if (shared >= 2) {
+        simEdges.push([i, j, shared]);
+      }
+    }
+  }
+
+  // All edges for force simulation (citation + similarity)
+  const allForceEdges = [...edges.map(e => [...e, 1]), ...simEdges];
+
+  // Force simulation (300 iterations)
+  for (let iter = 0; iter < 300; iter++) {
+    const alpha = 0.3 * (1 - iter / 300);
 
     // Repulsion
     for (let i = 0; i < nodes.length; i++) {
@@ -232,7 +251,7 @@ function generateGraphPNG(papers, query) {
         let dy = nodes[j].y - nodes[i].y;
         let d2 = dx * dx + dy * dy;
         if (d2 < 1) d2 = 1;
-        let f = 2000 / d2;
+        let f = 3000 / d2;
         let fx = dx / Math.sqrt(d2) * f;
         let fy = dy / Math.sqrt(d2) * f;
         nodes[i].vx -= fx * alpha;
@@ -242,12 +261,12 @@ function generateGraphPNG(papers, query) {
       }
     }
 
-    // Edge attraction
-    for (const [si, ti] of edges) {
+    // Edge attraction (citation + similarity)
+    for (const [si, ti, weight] of allForceEdges) {
       let dx = nodes[ti].x - nodes[si].x;
       let dy = nodes[ti].y - nodes[si].y;
       let d = Math.sqrt(dx * dx + dy * dy) || 1;
-      let f = (d - 100) * 0.01 * alpha;
+      let f = (d - 80) * 0.008 * Math.min(weight, 5) * alpha;
       let fx = dx / d * f, fy = dy / d * f;
       nodes[si].vx += fx; nodes[si].vy += fy;
       nodes[ti].vx -= fx; nodes[ti].vy -= fy;
@@ -285,7 +304,7 @@ function generateGraphPNG(papers, query) {
 
   // Edges
   for (const [si, ti] of edges) {
-    svg += `<line x1="${nodes[si].x}" y1="${nodes[si].y}" x2="${nodes[ti].x}" y2="${nodes[ti].y}" stroke="rgba(140,180,255,0.3)" stroke-width="1"/>`;
+    svg += `<line x1="${nodes[si].x}" y1="${nodes[si].y}" x2="${nodes[ti].x}" y2="${nodes[ti].y}" stroke="rgba(140,180,255,0.5)" stroke-width="1.5"/>`;
   }
 
   // Nodes + labels
