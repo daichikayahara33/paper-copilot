@@ -444,15 +444,13 @@ async function doSearch() {
     if (refPapers.length > 0 && getOpenAIKey()) {
       el.innerHTML = `<div class="loading"><span class="spinner"></span>LLM filtering ${refPapers.length} papers...</div>`;
       const filtered = await llmFilterPapers(query, refPapers);
-      // Add seeds + filtered refs
       addPapers(seeds, query);
       addPapers(filtered, query);
-      renderPaperList(el, [...seeds, ...filtered]);
     } else {
-      // No API key — just add seeds
       addPapers(seeds, query);
-      renderPaperList(el, seeds);
     }
+    // Show ALL papers in graph (sorted by citation count)
+    renderPaperList(el, [...papers].sort((a, b) => b.cited - a.cited));
     // Suggest related search queries (run in parallel, don't block)
     if (getOpenAIKey()) suggestRelatedQueries(query, seeds);
 
@@ -1037,6 +1035,10 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function loop() { simulate(); draw(); requestAnimationFrame(loop); }
 loadSettings();
 loadPapersFromStorage();
+// Show all papers from storage on initial load
+if (papers.length > 0) {
+  renderPaperList(document.getElementById('search-results'), [...papers].sort((a, b) => b.cited - a.cited));
+}
 loop();
 
 // Auto-search from URL parameter: ?q=keyword, ?fresh=1 for clean state
