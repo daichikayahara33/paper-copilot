@@ -1049,6 +1049,16 @@ function loop() { simulate(); draw(); requestAnimationFrame(loop); }
 loadSettings();
 loadPapersFromStorage();
 loop();
+
+// Auto-search from URL parameter: ?q=keyword
+(function() {
+  const params = new URLSearchParams(location.search);
+  const q = params.get('q');
+  if (q) {
+    document.getElementById('search-input').value = q;
+    setTimeout(() => doSearch(), 500);
+  }
+})();
 </script>
 </body>
 </html>
