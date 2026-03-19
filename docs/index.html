@@ -875,13 +875,31 @@ function draw() {
   ctx.save();
   ctx.translate(W/2, H/2); ctx.scale(zoom, zoom); ctx.translate(-W/2 + camX, -H/2 + camY);
 
-  // Edges — citation only, highlight selected node's edges
+  // Edges — citation only, with arrowheads, highlight selected node's edges
   for (const e of graphEdges) {
     if (e.type === 'cite') {
       const connected = selectedNode && (e.s === selectedNode || e.t === selectedNode);
-      ctx.strokeStyle = connected ? 'rgba(140,180,255,0.9)' : (selectedNode ? 'rgba(140,180,255,0.1)' : 'rgba(140,180,255,0.5)');
-      ctx.lineWidth = connected ? 2.5 : 1.2;
+      const color = connected ? 'rgba(140,180,255,0.9)' : (selectedNode ? 'rgba(140,180,255,0.1)' : 'rgba(140,180,255,0.5)');
+      const lw = connected ? 2.5 : 1.2;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = lw;
+      // Line
       ctx.beginPath(); ctx.moveTo(e.s.x, e.s.y); ctx.lineTo(e.t.x, e.t.y); ctx.stroke();
+      // Arrowhead pointing toward target (stop at node edge)
+      const dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const tr = nodeR(e.t);
+      const ax = e.t.x - (dx / d) * (tr + 4);
+      const ay = e.t.y - (dy / d) * (tr + 4);
+      const aSize = connected ? 8 : 5;
+      const angle = Math.atan2(dy, dx);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - aSize * Math.cos(angle - 0.4), ay - aSize * Math.sin(angle - 0.4));
+      ctx.lineTo(ax - aSize * Math.cos(angle + 0.4), ay - aSize * Math.sin(angle + 0.4));
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
