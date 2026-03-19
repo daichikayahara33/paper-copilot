@@ -231,7 +231,7 @@ function saveSettings() {
 }
 function getOpenAIKey() { return 'proxy'; }
 function getOpenAIModel() { return localStorage.getItem('pc_openai_model') || 'gpt-4o-mini'; }
-function getS2Key() { return ''; } // S2 key is now in the Worker proxy
+// S2 key is embedded in the Worker proxy — no longer needed client-side
 function getLang() { return localStorage.getItem('pc_lang') || 'en'; }
 
 // ── Tabs ──
@@ -251,48 +251,30 @@ const S2_PROXY = 'https://s2-proxy.d-kayahara33.workers.dev/';
 let s2LastCall = 0;
 
 async function s2Fetch(url) {
-  // Throttle: 1s on localhost (with API key), 3s on GitHub Pages (without key)
-  const throttle = (isLocalhost || getS2Key()) ? 1000 : 3000;
+  // Throttle: 1s (API key is in Worker proxy)
   const now = Date.now();
-  const wait = Math.max(0, throttle - (now - s2LastCall));
+  const wait = Math.max(0, 1000 - (now - s2LastCall));
   if (wait > 0) await sleep(wait);
   s2LastCall = Date.now();
 
-  let resp;
-  // On localhost: use local proxy server
-  if (isLocalhost) {
-    try {
-      if (url.startsWith(S2_BASE)) {
-        resp = await fetch('/api/s2/' + url.slice(S2_BASE.length));
-        if (resp.ok) return resp;
-      }
-    } catch(e) { /* proxy not available */ }
-  }
-
-  // On GitHub Pages: use Cloudflare Worker proxy
-  const fetchUrl = (!isLocalhost && url.startsWith(S2_BASE))
+  // Use Cloudflare Worker proxy (has S2 API key embedded)
+  const fetchUrl = url.startsWith(S2_BASE)
     ? S2_PROXY + url.slice(S2_BASE.length)
     : url;
 
-  // Pass S2 API key through Worker if available
-  const fetchOpts = {};
-  const s2Key = getS2Key();
-  if (s2Key && !isLocalhost && url.startsWith(S2_BASE)) {
-    fetchOpts.headers = { 'x-s2-key': s2Key };
-  }
-
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      resp = await fetch(fetchUrl, fetchOpts);
+      const resp = await fetch(fetchUrl);
+      if (resp.ok) return resp;
+      if (resp.status === 429) {
+        await sleep((attempt + 1) * 3000);
+        continue;
+      }
+      throw new Error(`S2 error: ${resp.status}`);
     } catch(e) {
-      throw new Error(`Network error: ${e.message}`);
+      if (attempt === 2) throw new Error(`Network error: ${e.message}`);
+      await sleep(2000);
     }
-    if (resp.ok) return resp;
-    if (resp.status === 429) {
-      await sleep((attempt + 1) * 3000);
-      continue;
-    }
-    throw new Error(`S2 error: ${resp.status}`);
   }
   throw new Error('Rate limited by S2 API. Wait a minute and try again.');
 }
@@ -316,34 +298,23 @@ async function s2GetPaper(paperId) {
 
 async function s2BatchGetPapers(paperIds) {
   const fields = 'paperId,title,authors,abstract,year,venue,externalIds,citationCount,references';
-  const baseUrl = `https://api.semanticscholar.org/graph/v1/paper/batch?fields=${fields}`;
+  const fetchUrl = S2_PROXY + 'paper/batch?fields=' + fields;
   const results = [];
 
-  // Batch API accepts max 500 IDs per request, chunk into 100 for safety
   for (let i = 0; i < paperIds.length; i += 100) {
     const chunk = paperIds.slice(i, i + 100);
-    const fetchUrl = (!isLocalhost && baseUrl.startsWith(S2_BASE))
-      ? S2_PROXY + 'paper/batch?fields=' + fields
-      : baseUrl;
-
-    const fetchOpts = {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: chunk }),
-    };
-    const s2Key = getS2Key();
-    if (s2Key && !isLocalhost) fetchOpts.headers['x-s2-key'] = s2Key;
-
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        // Throttle
         const now = Date.now();
-        const throttle = (isLocalhost || getS2Key()) ? 1000 : 3000;
-        const wait = Math.max(0, throttle - (now - s2LastCall));
+        const wait = Math.max(0, 1000 - (now - s2LastCall));
         if (wait > 0) await sleep(wait);
         s2LastCall = Date.now();
 
-        const resp = await fetch(fetchUrl, fetchOpts);
+        const resp = await fetch(fetchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: chunk }),
+        });
         if (resp.ok) {
           const data = await resp.json();
           for (const d of data) {
